@@ -11,7 +11,7 @@ import (
 	"github.com/progrium/darwinkit/macos/foundation"
 )
 
-var handler = func(activeApp string, appActivated <-chan string, requests chan<- []tools.AppInfo) {
+var handler = func(activeApp string, appActivated <-chan string, requests chan tools.Request) {
 	fmt.Println("Running handler")
 	applications := map[string]int64{}
 	activeApplication := activeApp
@@ -28,7 +28,14 @@ var handler = func(activeApp string, appActivated <-chan string, requests chan<-
 
 	for {
 		select {
-		case requests <- statistics:
+		case request := <-requests:
+			now := time.Now().UnixMilli()
+			periodAppWasActive := now - activatedAt
+			applications[activeApplication] = applications[activeApplication] + periodAppWasActive
+			activatedAt = now
+			calculateStatistics()
+			request.ResponseChan <- statistics
+
 			// fmt.Println("Statistics sent")
 			// for _, ai := range statistics {
 			// 	fmt.Print(ai.Dump())
@@ -56,7 +63,7 @@ var appKey = foundation.NewStringWithString("NSWorkspaceApplicationKey")
 func main() {
 	notifications := make(chan string)
 	defer close(notifications)
-	requests := make(chan []tools.AppInfo)
+	requests := make(chan tools.Request)
 	defer close(requests)
 
 	macos.RunApp(func(app appkit.Application, delegate *appkit.ApplicationDelegate) {

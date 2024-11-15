@@ -11,7 +11,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 )
 
-func StartBot(requests chan []tools.AppInfo) {
+func StartBot(requests chan tools.Request) {
 	fmt.Println("Running bot")
 	index := 0
 	pref := tele.Settings{
@@ -39,7 +39,9 @@ func StartBot(requests chan []tools.AppInfo) {
 	})
 
 	b.Handle("/status", func(c tele.Context) error {
-		appInfos := <-requests
+		responseChan := make(chan []tools.AppInfo)
+		requests <- tools.Request{ResponseChan: responseChan}
+		appInfos := <-responseChan
 		var statistics string
 		for _, appInfo := range appInfos {
 			statistics += appInfo.Dump()

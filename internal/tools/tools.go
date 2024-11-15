@@ -19,3 +19,7 @@ type AppInfo struct {
 func (ac AppInfo) Dump() string {
 	return fmt.Sprintf("%s runs for: %d [ms]\n", ac.Identity, ac.Time)
 }
+
+type Request struct {
+	ResponseChan chan<- []AppInfo
+}
