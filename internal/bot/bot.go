@@ -7,11 +7,11 @@ import (
 	"os/exec"
 	"time"
 
-	. "github.com/cankill/parental-control/internal/tools"
+	"github.com/cankill/parental-control/internal/tools"
 	tele "gopkg.in/telebot.v4"
 )
 
-func StartBot(requests chan AppAction) {
+func StartBot(requests chan tools.AppAction) {
 	fmt.Println("Running bot:")
 	index := 0
 	pref := tele.Settings{
