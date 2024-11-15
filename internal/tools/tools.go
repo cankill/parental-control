@@ -2,20 +2,20 @@ package tools
 
 import "fmt"
 
-type ActionType string
+// type ActionType string
 
-const (
-	APPLICATION_STARTED  ActionType = "Application Started"
-	APPLICATION_FINISHED            = "Application Finished"
-	GAIN_FOCUS                      = "Application Gained Focus"
-	LOOSE_FOCUS                     = "Application Looses Focus"
-)
+// const (
+// 	APPLICATION_STARTED  ActionType = "Application Started"
+// 	APPLICATION_FINISHED            = "Application Finished"
+// 	GAIN_FOCUS                      = "Application Gained Focus"
+// 	LOOSE_FOCUS                     = "Application Looses Focus"
+// )
 
-type AppAction struct {
+type AppInfo struct {
 	Identity string
-	Action   ActionType
+	Time     int64
 }
 
-func (ac AppAction) Dump() string {
-	return fmt.Sprintf("AppAction {identity: %s, action: %s}", ac.Identity, ac.Action)
+func (ac AppInfo) Dump() string {
+	return fmt.Sprintf("%s runs for: %d [ms]\n", ac.Identity, ac.Time)
 }

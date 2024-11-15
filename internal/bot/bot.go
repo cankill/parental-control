@@ -11,8 +11,8 @@ import (
 	tele "gopkg.in/telebot.v4"
 )
 
-func StartBot(requests chan tools.AppAction) {
-	fmt.Println("Running bot:")
+func StartBot(requests chan []tools.AppInfo) {
+	fmt.Println("Running bot")
 	index := 0
 	pref := tele.Settings{
 		Token:  os.Getenv("BOT_TOKEN"),
@@ -39,8 +39,13 @@ func StartBot(requests chan tools.AppAction) {
 	})
 
 	b.Handle("/status", func(c tele.Context) error {
-		appAction := <-requests
-		return c.Send(appAction.Dump())
+		appInfos := <-requests
+		var statistics string
+		for _, appInfo := range appInfos {
+			statistics += appInfo.Dump()
+		}
+
+		return c.Send(statistics)
 	})
 
 	// Command: /start <PAYLOAD>
