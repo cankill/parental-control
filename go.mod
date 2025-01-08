@@ -1,4 +1,4 @@
-module github.com/cankill/parental-control
+module parental-control
 
 go 1.23.2
 

@@ -5,9 +5,9 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"parental-control/internal/tools"
 	"time"
 
-	"github.com/cankill/parental-control/internal/tools"
 	tele "gopkg.in/telebot.v4"
 )
 
