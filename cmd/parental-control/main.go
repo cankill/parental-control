@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 	"parental-control/internal/bot"
+	"parental-control/internal/lib/types"
 	"parental-control/internal/statistics"
-	"parental-control/internal/tools"
+	"syscall"
 
 	"github.com/progrium/darwinkit/macos"
 	"github.com/progrium/darwinkit/macos/appkit"
@@ -14,27 +17,27 @@ import (
 var appKey = foundation.NewStringWithString("NSWorkspaceApplicationKey")
 
 func main() {
-	// sigs := make(chan os.Signal, 1)
+	sigs := make(chan os.Signal, 1)
 
-	notifications := make(chan string)
-	defer close(notifications)
-	requests := make(chan tools.Request)
+	commandsChannel := make(chan types.AppCommand)
+	defer close(commandsChannel)
+	requests := make(chan types.Request)
 	defer close(requests)
 
 	macos.RunApp(func(app appkit.Application, delegate *appkit.ApplicationDelegate) {
-		// signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 		fmt.Println("Starting up Mac OS X Application")
 		sharedWorkspace := appkit.Workspace_SharedWorkspace()
 		initiallyActiveApplication := sharedWorkspace.FrontmostApplication()
 
-		go statistics.Handler(initiallyActiveApplication.BundleIdentifier(), notifications, requests)
+		go statistics.Handler(initiallyActiveApplication.BundleIdentifier(), commandsChannel, requests)
 		go bot.StartBot(requests)
-		// go func() {
-		// 	sig := <-sigs
-		// 	fmt.Println()
-		// 	fmt.Printf("Signal received: %v", sig)
-		// 	fmt.Println("Stopping Mac OS X Application")
-		// }()
+		go func() {
+			<-sigs
+			fmt.Println("Stopping Mac OS X Application")
+			commandsChannel <- types.StopCommand{}
+			app.Terminate(app)
+		}()
 
 		notificationCenter := sharedWorkspace.NotificationCenter()
 		notificationCenter.AddObserverForNameObjectQueueUsingBlock(
@@ -43,7 +46,7 @@ func main() {
 			foundation.OperationQueue_MainQueue(),
 			func(notification foundation.Notification) {
 				focussedApp := appkit.RunningApplicationFrom(notification.UserInfo().ObjectForKey(appKey).Ptr()).BundleIdentifier()
-				notifications <- focussedApp
+				commandsChannel <- types.NewAppEvent{AppName: focussedApp}
 			})
 
 		fmt.Println("Mac OS X Application started")

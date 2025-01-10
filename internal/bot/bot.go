@@ -5,13 +5,13 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"parental-control/internal/tools"
+	"parental-control/internal/lib/types"
 	"time"
 
 	tele "gopkg.in/telebot.v4"
 )
 
-func StartBot(requests chan<- tools.Request) {
+func StartBot(requests chan<- types.Request) {
 	defer func() {
 		fmt.Println("Bot finished")
 	}()
@@ -43,8 +43,8 @@ func StartBot(requests chan<- tools.Request) {
 	})
 
 	b.Handle("/status", func(c tele.Context) error {
-		responseChan := make(chan []tools.AppInfo)
-		requests <- tools.Request{ResponseChan: responseChan}
+		responseChan := make(chan []types.AppInfo)
+		requests <- types.Request{ResponseChan: responseChan}
 		appInfos := <-responseChan
 		var statistics string
 		for _, appInfo := range appInfos {
