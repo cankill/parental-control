@@ -11,7 +11,11 @@ import (
 	tele "gopkg.in/telebot.v4"
 )
 
-func StartBot(requests chan tools.Request) {
+func StartBot(requests chan<- tools.Request) {
+	defer func() {
+		fmt.Println("Bot finished")
+	}()
+
 	fmt.Println("Running bot")
 	index := 0
 	pref := tele.Settings{

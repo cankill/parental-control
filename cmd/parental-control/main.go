@@ -3,79 +3,40 @@ package main
 import (
 	"fmt"
 	"parental-control/internal/bot"
+	"parental-control/internal/statistics"
 	"parental-control/internal/tools"
-	"time"
 
 	"github.com/progrium/darwinkit/macos"
 	"github.com/progrium/darwinkit/macos/appkit"
 	"github.com/progrium/darwinkit/macos/foundation"
 )
 
-var handler = func(activeApp string, appActivated <-chan string, requests chan tools.Request) {
-	fmt.Println("Running handler")
-	applications := map[string]int64{}
-	activeApplication := activeApp
-	activatedAt := time.Now().UnixMilli()
-	var statistics []tools.AppInfo
-
-	calculateStatistics := func() {
-		result := make([]tools.AppInfo, 0)
-		for app, time := range applications {
-			result = append(result, tools.AppInfo{Identity: app, Time: time})
-		}
-		statistics = result
-	}
-
-	for {
-		select {
-		case request := <-requests:
-			now := time.Now().UnixMilli()
-			periodAppWasActive := now - activatedAt
-			applications[activeApplication] = applications[activeApplication] + periodAppWasActive
-			activatedAt = now
-			calculateStatistics()
-			request.ResponseChan <- statistics
-
-			// fmt.Println("Statistics sent")
-			// for _, ai := range statistics {
-			// 	fmt.Print(ai.Dump())
-			// }
-		case newActiveApplication := <-appActivated:
-			now := time.Now().UnixMilli()
-			periodAppWasActive := now - activatedAt
-			applications[activeApplication] = applications[activeApplication] + periodAppWasActive
-			activeApplication = newActiveApplication
-			activatedAt = now
-
-			// fmt.Println("Applications:")
-			// for app, time := range applications {
-			// 	fmt.Printf("App name: %s, time: %d\n", app, time)
-			// }
-
-			calculateStatistics()
-		}
-	}
-}
-
-// var bundleIdentity = foundation.NewStringWithString("NSApplicationBundleIdentifier")
 var appKey = foundation.NewStringWithString("NSWorkspaceApplicationKey")
 
 func main() {
+	// sigs := make(chan os.Signal, 1)
+
 	notifications := make(chan string)
 	defer close(notifications)
 	requests := make(chan tools.Request)
 	defer close(requests)
 
 	macos.RunApp(func(app appkit.Application, delegate *appkit.ApplicationDelegate) {
-		fmt.Println("Let's start application")
-		ws := appkit.Workspace_SharedWorkspace()
+		// signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		fmt.Println("Starting up Mac OS X Application")
+		sharedWorkspace := appkit.Workspace_SharedWorkspace()
+		initiallyActiveApplication := sharedWorkspace.FrontmostApplication()
 
-		frontmost := ws.FrontmostApplication()
-
-		go handler(frontmost.BundleIdentifier(), notifications, requests)
+		go statistics.Handler(initiallyActiveApplication.BundleIdentifier(), notifications, requests)
 		go bot.StartBot(requests)
+		// go func() {
+		// 	sig := <-sigs
+		// 	fmt.Println()
+		// 	fmt.Printf("Signal received: %v", sig)
+		// 	fmt.Println("Stopping Mac OS X Application")
+		// }()
 
-		notificationCenter := ws.NotificationCenter()
+		notificationCenter := sharedWorkspace.NotificationCenter()
 		notificationCenter.AddObserverForNameObjectQueueUsingBlock(
 			"NSWorkspaceDidActivateApplicationNotification",
 			nil,
@@ -84,5 +45,7 @@ func main() {
 				focussedApp := appkit.RunningApplicationFrom(notification.UserInfo().ObjectForKey(appKey).Ptr()).BundleIdentifier()
 				notifications <- focussedApp
 			})
+
+		fmt.Println("Mac OS X Application started")
 	})
 }
