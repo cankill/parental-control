@@ -7,16 +7,21 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 const (
-	DbPath     = "./database"
-	DateFormat = "2006-01-02T15"
+	DbPath          = "./database"
+	TruncatedToHour = "2006-01-02T15"
 )
 
 type Storage struct {
 	localStorage *nutsdbstorage.LocalStorage
 }
+
+var capitalizer = cases.Title(language.English)
 
 func New() (*Storage, error) {
 	const op = "storage.New"
@@ -46,33 +51,41 @@ func (s *Storage) NewBucket(bucketName string) error {
 
 }
 
-func (s *Storage) IncreaseStatistics(currentBucket string, appName string, currentActivatedAt time.Time) (bucket string, activatedAt time.Time) {
-	const op = "storage.IncreaseStatistics"
-	activatedAt = time.Now()
+func (s *Storage) IncreaseStatistics(currentBucket string, appName string, fromDate time.Time) (bucket string, toDate time.Time) {
+	// const op = "storage.IncreaseStatistics"
+	toDate = time.Now()
 
-	bucket = currentBucket
+	hours := toDate.Sub(fromDate).Hours() // 0.0001 e.g.
 
-	hours := activatedAt.Sub(currentActivatedAt).Hours()
-	fmt.Printf("%s: Hours between measurements: %f [hours]\n", op, hours)
-
-	periodAppWasActive := activatedAt.UnixMilli() - currentActivatedAt.UnixMilli()
-
-	newBucketName := activatedAt.Format(DateFormat)
-	if newBucketName != currentBucket {
-		err := s.NewBucket(newBucketName)
-		if err != nil {
-			fmt.Printf("%s: Lost period: %d [ms] for the app: %s", op, periodAppWasActive, appName)
-			return
-		}
-		bucket = newBucketName
+	for hours > 0 {
+		newToDate := fromDate.Truncate(time.Hour).Add(59 * time.Minute).Add(59 * time.Second)
+		newToDate = types.Min(newToDate, toDate)
+		bucket = s.process(fromDate, newToDate, currentBucket, appName)
+		fromDate = fromDate.Truncate(time.Hour)
+		hours -= 1
 	}
-
-	s.IncreaseStatistic(bucket, appName, periodAppWasActive)
 
 	return
 }
 
-func (s *Storage) IncreaseStatistic(bucket string, appName string, periodAppWasActive int64) {
+func (s *Storage) process(fromDate time.Time, toDate time.Time, currentBucket string, appName string) string {
+	const op = "storage.process"
+	periodAppWasActive := toDate.UnixMilli() - fromDate.UnixMilli()
+
+	bucket := toDate.Format(TruncatedToHour)
+	if bucket != currentBucket {
+		err := s.NewBucket(bucket)
+		if err != nil {
+			fmt.Printf("%s: Lost period: %d [ms] for the app: %s", op, periodAppWasActive, appName)
+			return currentBucket
+		}
+	}
+
+	s.IncreaseAppUsageTime(bucket, appName, periodAppWasActive)
+	return bucket
+}
+
+func (s *Storage) IncreaseAppUsageTime(bucket string, appName string, periodAppWasActive int64) {
 	const op = "storage.IncreaseStatistic"
 	storedValue, err := s.localStorage.GetValue(bucket, appName)
 	if err != nil {
@@ -126,7 +139,7 @@ func (s *Storage) GetStatistics(bucketName string, appName string) (*int64, erro
 
 func (s *Storage) GetAppStatistic(appName string) (*int64, error) {
 	now := time.Now()
-	bucket := now.Format(DateFormat)
+	bucket := now.Format(TruncatedToHour)
 	return s.GetStatistics(bucket, appName)
 }
 
@@ -148,7 +161,7 @@ func (s *Storage) CalculateStatistics(bucketName string) []types.AppInfo {
 		}
 		duration := time.Duration(milliseconds * 1000000)
 
-		appName := strings.Title(types.Last(strings.Split(appIdentity, ".")))
+		appName := capitalizer.String(types.Last(strings.Split(appIdentity, ".")))
 		statistics = append(statistics, types.AppInfo{Identity: appName, Time: duration.String()})
 	}
 
@@ -157,6 +170,6 @@ func (s *Storage) CalculateStatistics(bucketName string) []types.AppInfo {
 
 func (s *Storage) CalculateStatisticsCurrentHour() []types.AppInfo {
 	now := time.Now()
-	bucket := now.Format(DateFormat)
+	bucket := now.Format(TruncatedToHour)
 	return s.CalculateStatistics(bucket)
 }
