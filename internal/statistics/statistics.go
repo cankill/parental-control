@@ -2,48 +2,45 @@ package statistics
 
 import (
 	"fmt"
+	"os"
+	"parental-control/internal/lib/storage"
 	"parental-control/internal/lib/types"
 	"time"
 )
 
 func Handler(activeApplication string, commandsChannel <-chan types.AppCommand, requests <-chan types.Request) {
-	//TODO: Load Satistics from DB
-	defer func() {
-		fmt.Println("Todo: store statistics to DB")
-	}()
-
 	fmt.Println("Running handler")
-	applications := map[string]int64{}
-	activatedAt := time.Now().UnixMilli()
+	activatedAt := time.Now()
+	activeBucketName := ""
 
-	statistics := func() []types.AppInfo {
-		statistics := make([]types.AppInfo, 0)
-		for app, time := range applications {
-			statistics = append(statistics, types.AppInfo{Identity: app, Time: time})
-		}
-		return statistics
+	storage, err := storage.New()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
+	fmt.Println("Storage opened")
 
 	for {
 		select {
 		case request := <-requests:
-			now := time.Now().UnixMilli()
-			periodAppWasActive := now - activatedAt
-			applications[activeApplication] = applications[activeApplication] + periodAppWasActive
-			activatedAt = now
-			request.ResponseChan <- statistics()
+			activeBucketName, activatedAt = storage.IncreaseStatistics(activeBucketName, activeApplication, activatedAt)
+			request.ResponseChan <- storage.CalculateStatisticsCurrentHour()
+
 		case command := <-commandsChannel:
 			switch command.Type() {
 			case types.Command:
 				fmt.Println("Stop received, finishing Statistics handling")
+				storage.IncreaseStatistics(activeBucketName, activeApplication, activatedAt)
+				storage.Close()
+				fmt.Println("Storage closed")
+				stopCommand := command.(types.StopCommand)
+				stopCommand.StoppedChan <- true
 				return
+
 			case types.Event:
 				event := command.(types.NewAppEvent)
-				now := time.Now().UnixMilli()
-				periodAppWasActive := now - activatedAt
-				applications[activeApplication] = applications[activeApplication] + periodAppWasActive
+				activeBucketName, activatedAt = storage.IncreaseStatistics(activeBucketName, activeApplication, activatedAt)
 				activeApplication = event.AppName
-				activatedAt = now
 			}
 		}
 	}

@@ -13,11 +13,11 @@ import "fmt"
 
 type AppInfo struct {
 	Identity string
-	Time     int64
+	Time     string
 }
 
 func (ac AppInfo) Dump() string {
-	return fmt.Sprintf("%s runs for: %d [ms]\n", ac.Identity, ac.Time)
+	return fmt.Sprintf("%s: %s\n", ac.Identity, ac.Time)
 }
 
 type Request struct {
@@ -35,7 +35,9 @@ const (
 	Event
 )
 
-type StopCommand struct{}
+type StopCommand struct {
+	StoppedChan chan<- bool
+}
 
 func (sc StopCommand) Type() AppCommandType {
 	return Command
@@ -47,4 +49,8 @@ type NewAppEvent struct {
 
 func (sc NewAppEvent) Type() AppCommandType {
 	return Event
+}
+
+func Last(ss []string) string {
+	return ss[len(ss)-1]
 }

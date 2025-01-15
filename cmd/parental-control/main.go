@@ -17,14 +17,13 @@ import (
 var appKey = foundation.NewStringWithString("NSWorkspaceApplicationKey")
 
 func main() {
-	sigs := make(chan os.Signal, 1)
-
 	commandsChannel := make(chan types.AppCommand)
 	defer close(commandsChannel)
 	requests := make(chan types.Request)
 	defer close(requests)
 
 	macos.RunApp(func(app appkit.Application, delegate *appkit.ApplicationDelegate) {
+		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 		fmt.Println("Starting up Mac OS X Application")
 		sharedWorkspace := appkit.Workspace_SharedWorkspace()
@@ -34,8 +33,11 @@ func main() {
 		go bot.StartBot(requests)
 		go func() {
 			<-sigs
+			fmt.Println()
 			fmt.Println("Stopping Mac OS X Application")
-			commandsChannel <- types.StopCommand{}
+			stoppedChan := make(chan bool)
+			commandsChannel <- types.StopCommand{StoppedChan: stoppedChan}
+			<-stoppedChan
 			app.Terminate(app)
 		}()
 
