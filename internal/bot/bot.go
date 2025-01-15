@@ -1,13 +1,16 @@
 package bot
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"parental-control/internal/lib/types"
+	"slices"
 	"time"
 
+	"github.com/olekukonko/tablewriter"
 	tele "gopkg.in/telebot.v4"
 )
 
@@ -46,12 +49,30 @@ func StartBot(requests chan<- types.Request) {
 		responseChan := make(chan []types.AppInfo)
 		requests <- types.Request{ResponseChan: responseChan}
 		appInfos := <-responseChan
-		var statistics string
-		for _, appInfo := range appInfos {
-			statistics += appInfo.Dump()
-		}
 
-		return c.Send(statistics)
+		slices.SortFunc(appInfos, func(a types.AppInfo, b types.AppInfo) int {
+			if a.Duration < b.Duration {
+				return 1
+			}
+			return -1
+		})
+
+		var buf bytes.Buffer
+		table := tablewriter.NewWriter(&buf)
+		table.SetHeader([]string{"App", "Time spent"})
+		table.SetBorder(false)
+		total := time.Duration(0)
+		for _, appInfo := range appInfos {
+			table.Append(appInfo.Table())
+			total += appInfo.Duration
+		}
+		table.SetFooter([]string{"Total", total.String()})
+		table.Render()
+		statistics := "```\n" + buf.String() + "\n```"
+
+		return c.Send(statistics, &tele.SendOptions{
+			ParseMode: tele.ModeMarkdownV2,
+		})
 	})
 
 	// Command: /start <PAYLOAD>

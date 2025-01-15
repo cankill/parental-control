@@ -162,13 +162,13 @@ func (s *Storage) CalculateStatistics(bucketName string) []types.AppInfo {
 		duration := time.Duration(milliseconds * 1000000)
 
 		appName := capitalizer.String(types.Last(strings.Split(appIdentity, ".")))
-		statistics = append(statistics, types.AppInfo{Identity: appName, Time: duration.String()})
+		statistics = append(statistics, types.AppInfo{Identity: appName, Duration: duration})
 	}
 
 	return statistics
 }
 
-func (s *Storage) CalculateStatisticsCurrentHour() []types.AppInfo {
+func (s *Storage) GetStatisticsCurrentHour() []types.AppInfo {
 	now := time.Now()
 	bucket := now.Format(TruncatedToHour)
 	return s.CalculateStatistics(bucket)

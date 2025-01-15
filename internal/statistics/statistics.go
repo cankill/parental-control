@@ -24,7 +24,7 @@ func Handler(activeApplication string, commandsChannel <-chan types.AppCommand, 
 		select {
 		case request := <-requests:
 			activeBucketName, activatedAt = storage.IncreaseStatistics(activeBucketName, activeApplication, activatedAt)
-			request.ResponseChan <- storage.CalculateStatisticsCurrentHour()
+			request.ResponseChan <- storage.GetStatisticsCurrentHour()
 
 		case command := <-commandsChannel:
 			switch command.Type() {

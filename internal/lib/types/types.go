@@ -16,11 +16,15 @@ import (
 
 type AppInfo struct {
 	Identity string
-	Time     string
+	Duration time.Duration
 }
 
 func (ac AppInfo) Dump() string {
-	return fmt.Sprintf("%s: %s\n", ac.Identity, ac.Time)
+	return fmt.Sprintf("%s:\t%s\n", ac.Identity, ac.Duration)
+}
+
+func (ac AppInfo) Table() []string {
+	return []string{ac.Identity, ac.Duration.String()}
 }
 
 type Request struct {
