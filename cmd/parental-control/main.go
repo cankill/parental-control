@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"parental-control/internal/bot"
 	"parental-control/internal/lib/types"
 	"parental-control/internal/statistics"
+	"sync"
 	"syscall"
 
 	"github.com/progrium/darwinkit/macos"
@@ -17,27 +19,36 @@ import (
 var appKey = foundation.NewStringWithString("NSWorkspaceApplicationKey")
 
 func main() {
-	commandsChannel := make(chan types.AppCommand)
-	defer close(commandsChannel)
-	requests := make(chan types.Request)
-	defer close(requests)
-
 	macos.RunApp(func(app appkit.Application, delegate *appkit.ApplicationDelegate) {
+		wg := sync.WaitGroup{}
+		ctx, cancelFunc := context.WithCancel(context.Background())
+		ctx = context.WithValue(ctx, types.WgKey{}, &wg)
+
+		statisticsCommandsChannel := make(chan types.AppCommand)
 		sigs := make(chan os.Signal, 1)
+
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 		fmt.Println("Starting up Mac OS X Application")
 		sharedWorkspace := appkit.Workspace_SharedWorkspace()
 		initiallyActiveApplication := sharedWorkspace.FrontmostApplication()
 
-		go statistics.Handler(initiallyActiveApplication.BundleIdentifier(), commandsChannel, requests)
-		go bot.StartBot(requests)
+		wg.Add(1)
+		go statistics.Handler(ctx, initiallyActiveApplication.BundleIdentifier(), statisticsCommandsChannel)
+
+		wg.Add(1)
+		go bot.StartBot(ctx, statisticsCommandsChannel)
+
 		go func() {
 			<-sigs
 			fmt.Println()
 			fmt.Println("Stopping Mac OS X Application")
-			stoppedChan := make(chan bool)
-			commandsChannel <- types.StopCommand{StoppedChan: stoppedChan}
-			<-stoppedChan
+
+			cancelFunc()
+
+			close(sigs)
+			close(statisticsCommandsChannel)
+
+			wg.Wait()
 			app.Terminate(app)
 		}()
 
@@ -48,7 +59,7 @@ func main() {
 			foundation.OperationQueue_MainQueue(),
 			func(notification foundation.Notification) {
 				focussedApp := appkit.RunningApplicationFrom(notification.UserInfo().ObjectForKey(appKey).Ptr()).BundleIdentifier()
-				commandsChannel <- types.NewAppEvent{AppName: focussedApp}
+				statisticsCommandsChannel <- types.NewAppEvent{AppName: focussedApp}
 			})
 
 		fmt.Println("Mac OS X Application started")

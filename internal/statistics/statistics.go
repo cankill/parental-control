@@ -1,17 +1,18 @@
 package statistics
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"parental-control/internal/lib/storage"
 	"parental-control/internal/lib/types"
+	"sync"
 	"time"
 )
 
-func Handler(activeApplication string, commandsChannel <-chan types.AppCommand, requests <-chan types.Request) {
+func Handler(ctx context.Context, activeApplication string, commandsChannel <-chan types.AppCommand) {
 	fmt.Println("Running handler")
 	activatedAt := time.Now()
-	activeBucketName := ""
 
 	storage, err := storage.New()
 	if err != nil {
@@ -22,24 +23,29 @@ func Handler(activeApplication string, commandsChannel <-chan types.AppCommand, 
 
 	for {
 		select {
-		case request := <-requests:
-			activeBucketName, activatedAt = storage.IncreaseStatistics(activeBucketName, activeApplication, activatedAt)
-			request.ResponseChan <- storage.GetStatisticsCurrentHour()
+		case <-ctx.Done():
+			fmt.Println("Stop received, finishing Statistics handling")
+			storage.IncreaseStatistics(activeApplication, activatedAt)
+			storage.Close()
+			fmt.Println("Storage closed")
+			wg := ctx.Value(types.WgKey{}).(*sync.WaitGroup)
+			wg.Done()
+			return
+
+		case <-time.Tick(time.Second * 30):
+			activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
+			storage.DumpTheUsage()
 
 		case command := <-commandsChannel:
 			switch command.Type() {
 			case types.Command:
-				fmt.Println("Stop received, finishing Statistics handling")
-				storage.IncreaseStatistics(activeBucketName, activeApplication, activatedAt)
-				storage.Close()
-				fmt.Println("Storage closed")
-				stopCommand := command.(types.StopCommand)
-				stopCommand.StoppedChan <- true
-				return
+				request := command.(types.RequestCommand)
+				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
+				request.ResponseChan <- storage.GetStatisticsCurrentHour()
 
 			case types.Event:
 				event := command.(types.NewAppEvent)
-				activeBucketName, activatedAt = storage.IncreaseStatistics(activeBucketName, activeApplication, activatedAt)
+				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
 				activeApplication = event.AppName
 			}
 		}

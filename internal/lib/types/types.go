@@ -1,18 +1,15 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
+	"sort"
 	"time"
+
+	"github.com/olekukonko/tablewriter"
 )
 
-// type ActionType string
-
-// const (
-// 	APPLICATION_STARTED  ActionType = "Application Started"
-// 	APPLICATION_FINISHED            = "Application Finished"
-// 	GAIN_FOCUS                      = "Application Gained Focus"
-// 	LOOSE_FOCUS                     = "Application Looses Focus"
-// )
+type WgKey struct{}
 
 type AppInfo struct {
 	Identity string
@@ -27,45 +24,33 @@ func (ac AppInfo) Table() []string {
 	return []string{ac.Identity, ac.Duration.String()}
 }
 
-type Request struct {
-	ResponseChan chan<- []AppInfo
+type AppInfos []AppInfo
+
+func (acs AppInfos) SortByDuration() {
+	sort.Slice(acs, func(i, j int) bool {
+		return acs[i].Duration < acs[j].Duration
+	})
 }
 
-type AppCommandType int
-
-type AppCommand interface {
-	Type() AppCommandType
+func (acs AppInfos) SortByDurationDesc() {
+	sort.Slice(acs, func(i, j int) bool {
+		return acs[i].Duration > acs[j].Duration
+	})
 }
 
-const (
-	Command AppCommandType = iota
-	Event
-)
+func (acs AppInfos) FormatTable() string {
+	var buf bytes.Buffer
+	table := tablewriter.NewWriter(&buf)
+	table.SetHeader([]string{"Application", "Time spent"})
+	table.SetBorder(false)
+	total := time.Duration(0)
 
-type StopCommand struct {
-	StoppedChan chan<- bool
-}
-
-func (sc StopCommand) Type() AppCommandType {
-	return Command
-}
-
-type NewAppEvent struct {
-	AppName string
-}
-
-func (sc NewAppEvent) Type() AppCommandType {
-	return Event
-}
-
-func Last(ss []string) string {
-	return ss[len(ss)-1]
-}
-
-func Min(a, b time.Time) time.Time {
-	if a.Compare(b) > 0 {
-		return b
+	for _, appInfo := range acs {
+		table.Append(appInfo.Table())
+		total += appInfo.Duration
 	}
 
-	return a
+	table.SetFooter([]string{"Total", total.String()})
+	table.Render()
+	return buf.String()
 }

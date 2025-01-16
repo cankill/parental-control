@@ -1,24 +1,21 @@
 package bot
 
 import (
-	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"parental-control/internal/lib/types"
-	"slices"
+	"strings"
+	"sync"
 	"time"
 
-	"github.com/olekukonko/tablewriter"
 	tele "gopkg.in/telebot.v4"
+	"gopkg.in/telebot.v4/middleware"
 )
 
-func StartBot(requests chan<- types.Request) {
-	defer func() {
-		fmt.Println("Bot finished")
-	}()
-
+func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	fmt.Println("Running bot")
 	index := 0
 	pref := tele.Settings{
@@ -32,13 +29,31 @@ func StartBot(requests chan<- types.Request) {
 		return
 	}
 
+	go func() {
+		<-ctx.Done()
+		b.Stop()
+		fmt.Println("Bot stopped")
+		wg := ctx.Value(types.WgKey{}).(*sync.WaitGroup)
+		wg.Done()
+	}()
+
+	admins := []int64{183358896}
+
+	b.Use(middleware.Whitelist(admins...))
+
 	// b.Use(middleware.Logger())
 	// b.Use(middleware.AutoRespond())
 
 	// Command: /start <PAYLOAD>
 	b.Handle("/youtube", func(c tele.Context) error {
-		fmt.Println(c.Message().Payload) // <PAYLOAD>
-		return c.Send("Ok")
+		args := strings.Split(c.Message().Payload, " ")
+		if len(args) != 1 {
+			c.Send("Error1")
+			return c.Send("Error2")
+		} else {
+			fmt.Println(c.Message().Payload) // <PAYLOAD>
+			return c.Send("Ok")
+		}
 	})
 
 	b.Handle("/ping", func(c tele.Context) error {
@@ -46,29 +61,12 @@ func StartBot(requests chan<- types.Request) {
 	})
 
 	b.Handle("/status", func(c tele.Context) error {
-		responseChan := make(chan []types.AppInfo)
-		requests <- types.Request{ResponseChan: responseChan}
+		responseChan := make(chan types.AppInfos)
+		requests <- types.RequestCommand{ResponseChan: responseChan}
 		appInfos := <-responseChan
 
-		slices.SortFunc(appInfos, func(a types.AppInfo, b types.AppInfo) int {
-			if a.Duration < b.Duration {
-				return 1
-			}
-			return -1
-		})
-
-		var buf bytes.Buffer
-		table := tablewriter.NewWriter(&buf)
-		table.SetHeader([]string{"App", "Time spent"})
-		table.SetBorder(false)
-		total := time.Duration(0)
-		for _, appInfo := range appInfos {
-			table.Append(appInfo.Table())
-			total += appInfo.Duration
-		}
-		table.SetFooter([]string{"Total", total.String()})
-		table.Render()
-		statistics := "```\n" + buf.String() + "\n```"
+		appInfos.SortByDurationDesc()
+		statistics := "```\n" + appInfos.FormatTable() + "\n```"
 
 		return c.Send(statistics, &tele.SendOptions{
 			ParseMode: tele.ModeMarkdownV2,

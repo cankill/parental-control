@@ -51,41 +51,42 @@ func (s *Storage) NewBucket(bucketName string) error {
 
 }
 
-func (s *Storage) IncreaseStatistics(currentBucket string, appName string, fromDate time.Time) (bucket string, toDate time.Time) {
-	// const op = "storage.IncreaseStatistics"
-	toDate = time.Now()
-
-	hours := toDate.Sub(fromDate).Hours() // 0.0001 e.g.
-
+func (s *Storage) IncreaseStatistics(appName string, fromDate time.Time) time.Time {
+	toDate := time.Now()
+	hours := toDate.Truncate(time.Hour).Sub(fromDate.Truncate(time.Hour)).Hours() + 1
 	for hours > 0 {
-		newToDate := fromDate.Truncate(time.Hour).Add(59 * time.Minute).Add(59 * time.Second)
+		newToDate := fromDate.Truncate(time.Hour).Add(1 * time.Hour)
 		newToDate = types.Min(newToDate, toDate)
-		bucket = s.process(fromDate, newToDate, currentBucket, appName)
-		fromDate = fromDate.Truncate(time.Hour)
+		s.process(fromDate, newToDate, appName)
+		fromDate = newToDate
 		hours -= 1
 	}
 
-	return
+	return toDate
 }
 
-func (s *Storage) process(fromDate time.Time, toDate time.Time, currentBucket string, appName string) string {
+func (s *Storage) process(fromDate time.Time, toDate time.Time, appName string) {
 	const op = "storage.process"
 	periodAppWasActive := toDate.UnixMilli() - fromDate.UnixMilli()
 
 	bucket := toDate.Format(TruncatedToHour)
-	if bucket != currentBucket {
+	exists, err := s.localStorage.FindBucket(bucket)
+	if err != nil {
+		fmt.Printf("%s: Lost period: %d [ms] for the app: %s", op, periodAppWasActive, appName)
+		return
+	}
+
+	if !exists {
 		err := s.NewBucket(bucket)
 		if err != nil {
 			fmt.Printf("%s: Lost period: %d [ms] for the app: %s", op, periodAppWasActive, appName)
-			return currentBucket
 		}
 	}
 
-	s.IncreaseAppUsageTime(bucket, appName, periodAppWasActive)
-	return bucket
+	s.increaseAppUsageTime(bucket, appName, periodAppWasActive)
 }
 
-func (s *Storage) IncreaseAppUsageTime(bucket string, appName string, periodAppWasActive int64) {
+func (s *Storage) increaseAppUsageTime(bucket string, appName string, periodAppWasActive int64) {
 	const op = "storage.IncreaseStatistic"
 	storedValue, err := s.localStorage.GetValue(bucket, appName)
 	if err != nil {
@@ -115,37 +116,15 @@ func (s *Storage) IncreaseAppUsageTime(bucket string, appName string, periodAppW
 	}
 }
 
-func (s *Storage) GetStatistics(bucketName string, appName string) (*int64, error) {
-	const op = "storage.GetStatistics"
-	storedValue, err := s.localStorage.GetValue(bucketName, appName)
-	if err != nil {
-		if err.Error() == "key not found" || err.Error() == "bucket not exist" {
-			storedValue = []byte("0")
-		} else {
-			fmt.Printf("%s: Problem getting from bucket (%s) application key (%s) error: %s\n", op, bucketName, appName, err)
-			return nil, fmt.Errorf("%s: Can't open local storage at: %s, with the error: %w", op, DbPath, err)
-		}
-	}
-
-	milliseconds, err := strconv.ParseInt(string(storedValue), 10, 64)
-	if err != nil {
-		fmt.Printf("Problem converting value: %s to number with error: %s\n", storedValue, err)
-		return nil, fmt.Errorf("%s: Can't parse local storage value: %s, with the error: %w", op, storedValue, err)
-	}
-
-	return &milliseconds, nil
-
-}
-
-func (s *Storage) GetAppStatistic(appName string) (*int64, error) {
+func (s *Storage) GetStatisticsCurrentHour() types.AppInfos {
 	now := time.Now()
 	bucket := now.Format(TruncatedToHour)
-	return s.GetStatistics(bucket, appName)
+	return s.CalculateStatistics(bucket)
 }
 
-func (s *Storage) CalculateStatistics(bucketName string) []types.AppInfo {
+func (s *Storage) CalculateStatistics(bucketName string) types.AppInfos {
 	const op = "storage.CalculateStatistics"
-	statistics := make([]types.AppInfo, 0)
+	statistics := make(types.AppInfos, 0)
 	values, err := s.localStorage.GetValues(bucketName)
 	if err != nil {
 		fmt.Printf("%s: Problem retreiving all values from the bucket: %s, with error: %s\n", op, bucketName, err)
@@ -168,8 +147,35 @@ func (s *Storage) CalculateStatistics(bucketName string) []types.AppInfo {
 	return statistics
 }
 
-func (s *Storage) GetStatisticsCurrentHour() []types.AppInfo {
+func (s *Storage) DumpTheUsage() {
+	const op = "storage.DumpTheUsage"
 	now := time.Now()
 	bucket := now.Format(TruncatedToHour)
-	return s.CalculateStatistics(bucket)
+	fmt.Printf("%s: Dump the usage for the current hour: %s\n", op, bucket)
+	values, err := s.localStorage.GetValues(bucket)
+	if err != nil {
+		if err.Error() == "bucket not exist" {
+			fmt.Printf("%s: No usage statistics yet...\n", op)
+		} else {
+			fmt.Printf("%s: Problem retreiving all values from the bucket: %s, with error: %s\n", op, bucket, err)
+		}
+		return
+	}
+
+	appInfos := types.AppInfos{}
+	for appIdentity, bytes := range values {
+		millisecondsStr := string(bytes)
+		milliseconds, err := strconv.ParseInt(millisecondsStr, 10, 64)
+		if err != nil {
+			fmt.Printf("%s: Problem converting value: %s to number with error: %s, skipping...\n", op, millisecondsStr, err)
+			continue
+		}
+		duration := time.Duration(milliseconds * 1000000)
+
+		appName := capitalizer.String(types.Last(strings.Split(appIdentity, ".")))
+		appInfos = append(appInfos, types.AppInfo{Identity: appName, Duration: duration})
+	}
+
+	appInfos.SortByDurationDesc()
+	fmt.Println(appInfos.FormatTable())
 }

@@ -36,6 +36,19 @@ func (s *LocalStorage) NewBucket(name string) error {
 	return err
 }
 
+func (s *LocalStorage) FindBucket(bucketName string) (found bool, err error) {
+	found = false
+	err = s.db.View(
+		func(tx *nutsdb.Tx) error {
+			return tx.IterateBuckets(nutsdb.DataStructureBTree, bucketName, func(bucket string) bool {
+				found = found || (bucket == bucketName)
+				return true
+			})
+		})
+
+	return
+}
+
 func (s *LocalStorage) GetValue(bucketName, key string) (result []byte, err error) {
 	err = s.db.View(
 		func(tx *nutsdb.Tx) error {
