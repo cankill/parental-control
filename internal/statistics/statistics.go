@@ -3,9 +3,8 @@ package statistics
 import (
 	"context"
 	"fmt"
-	"os"
-	"parental-control/internal/lib/storage"
 	"parental-control/internal/lib/types"
+	"parental-control/internal/statistics/statstorage"
 	"sync"
 	"time"
 )
@@ -14,21 +13,14 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 	fmt.Println("Running handler")
 	activatedAt := time.Now()
 
-	storage, err := storage.New()
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	storage := statstorage.Open()
 	fmt.Println("Storage opened")
-	storage.Test()
-	os.Exit(1)
 
 	for {
 		select {
 		case <-ctx.Done():
 			fmt.Println("Stop received, finishing Statistics handling")
 			storage.IncreaseStatistics(activeApplication, activatedAt)
-			storage.Close()
 			fmt.Println("Storage closed")
 			wg := ctx.Value(types.WgKey{}).(*sync.WaitGroup)
 			wg.Done()

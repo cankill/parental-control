@@ -13,7 +13,7 @@ type LocalStorage struct {
 	db *diskv.Diskv
 }
 
-func OpenStorage(dbFolder string) (*LocalStorage, error) {
+func OpenStorage(dbFolder string) *LocalStorage {
 	db := diskv.New(diskv.Options{
 		BasePath:          dbFolder,
 		AdvancedTransform: withBucketTransform,
@@ -21,7 +21,7 @@ func OpenStorage(dbFolder string) (*LocalStorage, error) {
 		CacheSizeMax:      1024 * 1024,
 	})
 
-	return &LocalStorage{db: db}, nil
+	return &LocalStorage{db: db}
 }
 
 func (s *LocalStorage) SaveValue(bucketName, key string, value string) {
