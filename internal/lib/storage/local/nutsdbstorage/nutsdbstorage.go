@@ -40,6 +40,17 @@ func (s *LocalStorage) FindBucket(bucketName string) (found bool, err error) {
 	found = false
 	err = s.db.View(
 		func(tx *nutsdb.Tx) error {
+			found = tx.ExistBucket(nutsdb.DataStructureBTree, bucketName)
+			return nil
+		})
+
+	return
+}
+
+func (s *LocalStorage) FindBucketOld(bucketName string) (found bool, err error) {
+	found = false
+	err = s.db.View(
+		func(tx *nutsdb.Tx) error {
 			return tx.IterateBuckets(nutsdb.DataStructureBTree, bucketName, func(bucket string) bool {
 				found = found || (bucket == bucketName)
 				return true
@@ -68,10 +79,18 @@ func (s *LocalStorage) GetValues(bucketName string) (result map[string][]byte, e
 	result = make(map[string][]byte)
 	err = s.db.View(
 		func(tx *nutsdb.Tx) error {
+			keys, err := tx.GetKeys(bucketName)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Result keys: %s\n", keys)
+
+			fmt.Printf("Requesting all pairs from: %s\n", bucketName)
 			keys, values, err := tx.GetAll(bucketName)
 			if err != nil {
 				return err
 			}
+			fmt.Printf("Result keys: %s and values:%s\n", keys, values)
 
 			for idx, key := range keys {
 				appName := string(key)

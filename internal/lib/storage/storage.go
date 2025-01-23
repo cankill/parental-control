@@ -2,7 +2,7 @@ package storage
 
 import (
 	"fmt"
-	"parental-control/internal/lib/storage/local/nutsdbstorage"
+	"parental-control/internal/lib/storage/local/diskvstorage"
 	"parental-control/internal/lib/types"
 	"strconv"
 	"strings"
@@ -18,7 +18,7 @@ const (
 )
 
 type Storage struct {
-	localStorage *nutsdbstorage.LocalStorage
+	localStorage *diskvstorage.LocalStorage
 }
 
 var capitalizer = cases.Title(language.English)
@@ -26,12 +26,50 @@ var capitalizer = cases.Title(language.English)
 func New() (*Storage, error) {
 	const op = "storage.New"
 
-	localStorage, err := nutsdbstorage.New(DbPath)
+	localStorage, err := diskvstorage.OpenStorage(DbPath)
 	if err != nil {
 		return nil, fmt.Errorf("%s: Can't open local storage at: %s, with the error: %w", op, DbPath, err)
 	}
 
 	return &Storage{localStorage: localStorage}, nil
+}
+
+func (s *Storage) Test() {
+	// b1 := "2025-01-20T10"
+	// b2 := "2025-01-20T11"
+	// b3 := "2025-01-20T12"
+	// b4 := "2025-01-20T13"
+	// b5 := "2025-01-20T14"
+	// b6 := "2025-01-20T15"
+	// b7 := "2025-01-20T16"
+	b1 := "aaa"
+	b2 := "bbb"
+	b3 := "ccc"
+	b4 := "ddd"
+	b5 := "eee"
+	b6 := "fff"
+	b7 := "ggg"
+	// s.NewBucket(b1)
+	// s.localStorage.SaveValue(b1, "key1", []byte("6"))
+	// s.NewBucket(b2)
+	// s.localStorage.SaveValue(b2, "key2", []byte("5"))
+	// s.NewBucket(b3)
+	// s.localStorage.SaveValue(b3, "key3", []byte("4"))
+	// s.NewBucket(b4)
+	// s.localStorage.SaveValue(b4, "key4", []byte("3"))
+	// s.NewBucket(b5)
+	// s.localStorage.SaveValue(b5, "key5", []byte("2"))
+	s.NewBucket(b6)
+	s.localStorage.SaveValue(b6, "key6", []byte("1"))
+	s.NewBucket(b7)
+	s.localStorage.SaveValue(b7, "key7", []byte("100"))
+	s.DumpBucket(b6)
+	s.DumpBucket(b1)
+	s.DumpBucket(b2)
+	s.DumpBucket(b3)
+	s.DumpBucket(b4)
+	s.DumpBucket(b5)
+	s.DumpBucket(b7)
 }
 
 func (s *Storage) Close() {
@@ -42,9 +80,13 @@ func (s *Storage) Close() {
 func (s *Storage) NewBucket(bucketName string) error {
 	const op = "storage.NewBucket"
 	err := s.localStorage.NewBucket(bucketName)
-	if err != nil && err.Error() != "bucket is already exist" {
-		fmt.Printf("%s: Problem creating new bucket (%s): %s\n", op, bucketName, err)
-		return err
+	if err != nil {
+		if err.Error() == "bucket is already exist" {
+			fmt.Printf("%s: Bucket exists (%s)\n", op, bucketName)
+		} else {
+			fmt.Printf("%s: Problem creating new bucket (%s): %s\n", op, bucketName, err)
+			return err
+		}
 	}
 
 	return nil
@@ -69,7 +111,7 @@ func (s *Storage) process(fromDate time.Time, toDate time.Time, appName string) 
 	const op = "storage.process"
 	periodAppWasActive := toDate.UnixMilli() - fromDate.UnixMilli()
 
-	bucket := toDate.Format(TruncatedToHour)
+	bucket := fromDate.Format(TruncatedToHour)
 	exists, err := s.localStorage.FindBucket(bucket)
 	if err != nil {
 		fmt.Printf("%s: Lost period: %d [ms] for the app: %s", op, periodAppWasActive, appName)
@@ -148,14 +190,53 @@ func (s *Storage) CalculateStatistics(bucketName string) types.AppInfos {
 }
 
 func (s *Storage) DumpTheUsage() {
-	const op = "storage.DumpTheUsage"
+	// const op = "storage.DumpTheUsage"
 	now := time.Now()
-	bucket := now.Format(TruncatedToHour)
+	for range 5 {
+		bucket := now.Format(TruncatedToHour)
+		s.DumpHour(bucket)
+		now = now.Add(-1 * time.Hour)
+	}
+}
+
+func (s *Storage) DumpHour(bucket string) {
+	const op = "storage.DumpHour"
 	fmt.Printf("%s: Dump the usage for the current hour: %s\n", op, bucket)
 	values, err := s.localStorage.GetValues(bucket)
 	if err != nil {
 		if err.Error() == "bucket not exist" {
 			fmt.Printf("%s: No usage statistics yet...\n", op)
+		} else {
+			fmt.Printf("%s: Problem retreiving all values from the bucket: %s, with error: %s\n", op, bucket, err)
+		}
+		return
+	}
+
+	appInfos := types.AppInfos{}
+	for appIdentity, bytes := range values {
+		millisecondsStr := string(bytes)
+		milliseconds, err := strconv.ParseInt(millisecondsStr, 10, 64)
+		if err != nil {
+			fmt.Printf("%s: Problem converting value: %s to number with error: %s, skipping...\n", op, millisecondsStr, err)
+			continue
+		}
+		duration := time.Duration(milliseconds * 1000000)
+
+		appName := capitalizer.String(types.Last(strings.Split(appIdentity, ".")))
+		appInfos = append(appInfos, types.AppInfo{Identity: appName, Duration: duration})
+	}
+
+	appInfos.SortByDurationDesc()
+	fmt.Println(appInfos.FormatTable())
+}
+
+func (s *Storage) DumpBucket(bucket string) {
+	const op = "storage.DumpHour"
+	fmt.Printf("%s: Dump the bucket: %s\n", op, bucket)
+	values, err := s.localStorage.GetValues(bucket)
+	if err != nil {
+		if err.Error() == "bucket not exist" {
+			fmt.Printf("%s: No bucket yet...\n", op)
 		} else {
 			fmt.Printf("%s: Problem retreiving all values from the bucket: %s, with error: %s\n", op, bucket, err)
 		}

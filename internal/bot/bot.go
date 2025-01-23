@@ -7,16 +7,26 @@ import (
 	"os"
 	"os/exec"
 	"parental-control/internal/lib/types"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/txn2/txeh"
 	tele "gopkg.in/telebot.v4"
 	"gopkg.in/telebot.v4/middleware"
 )
 
+var (
+	selector   = &tele.ReplyMarkup{}
+	b30Minutes = selector.Data("30 Minutes", "30-minutes")
+	b1Hour     = selector.Data("1 Hour", "1-hour")
+	bClose     = selector.Data("Close", "close")
+)
+
 func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	fmt.Println("Running bot")
+	var timersCtx context.Context
+	var timersCancelFunc context.CancelFunc
+
 	index := 0
 	pref := tele.Settings{
 		Token:  os.Getenv("BOT_TOKEN"),
@@ -29,6 +39,10 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 		return
 	}
 
+	selector.Inline(
+		selector.Row(b30Minutes, b1Hour, bClose),
+	)
+
 	go func() {
 		<-ctx.Done()
 		b.Stop()
@@ -40,25 +54,7 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	admins := []int64{183358896}
 
 	b.Use(middleware.Whitelist(admins...))
-
 	// b.Use(middleware.Logger())
-	// b.Use(middleware.AutoRespond())
-
-	// Command: /start <PAYLOAD>
-	b.Handle("/youtube", func(c tele.Context) error {
-		args := strings.Split(c.Message().Payload, " ")
-		if len(args) != 1 {
-			c.Send("Error1")
-			return c.Send("Error2")
-		} else {
-			fmt.Println(c.Message().Payload) // <PAYLOAD>
-			return c.Send("Ok")
-		}
-	})
-
-	b.Handle("/ping", func(c tele.Context) error {
-		return c.Send("pong")
-	})
 
 	b.Handle("/status", func(c tele.Context) error {
 		responseChan := make(chan types.AppInfos)
@@ -73,7 +69,6 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 		})
 	})
 
-	// Command: /start <PAYLOAD>
 	b.Handle("/screen", func(c tele.Context) error {
 		fname := fmt.Sprintf("/tmp/pc/capture-%d.png", index)
 		cmd := exec.Command("/usr/sbin/screencapture", fname)
@@ -87,5 +82,78 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 		return c.Send(image)
 	})
 
+	b.Handle("/youtube", func(c tele.Context) error {
+		return c.Reply("For how long?", selector)
+	})
+
+	b.Handle(&b30Minutes, func(c tele.Context) error {
+		fmt.Println("Youtube open for 30 minutes request received")
+		// c.Respond()
+		if timersCancelFunc != nil {
+			timersCancelFunc()
+		}
+		timersCtx, timersCancelFunc = context.WithCancel(ctx)
+		go startYoutubeTimer(c, timersCtx, 30*time.Minute)
+		return c.Edit("Timer for 30 minutes was set")
+	})
+
+	b.Handle(&b1Hour, func(c tele.Context) error {
+		fmt.Println("Youtube open for 1 hour request received")
+		// c.Respond()
+		if timersCancelFunc != nil {
+			timersCancelFunc()
+		}
+		timersCtx, timersCancelFunc = context.WithCancel(ctx)
+		go startYoutubeTimer(c, timersCtx, 1*time.Hour)
+		return c.Edit("Timer for 1 hour was set")
+	})
+
+	b.Handle(&bClose, func(c tele.Context) error {
+		fmt.Println("Youtube close request received")
+		// c.Respond()
+		if timersCancelFunc != nil {
+			timersCancelFunc()
+		}
+		return c.Edit("Youtube closed")
+	})
+
+	// b.Handle(tele.OnInlineResult, func(c tele.Context) error {
+	// 	fmt.Println("Inline btn received")
+	// 	go func(duration int) {
+	// 		fmt.Println("Starting timer for 30 seconds")
+	// 		<-time.Tick(time.Second * 30)
+	// 		c.Reply("30 seconds timer finished...")
+	// 	}(30)
+
+	// 	return c.Edit("Zhopa")
+	// })
+
 	b.Start()
+}
+
+func startYoutubeTimer(c tele.Context, timersCtx context.Context, duration time.Duration) {
+	var hosts = timersCtx.Value(types.HostsKey{}).(*txeh.Hosts)
+	hosts.RemoveHosts([]string{"youtube.com", "www.youtube.com"})
+	hfData := hosts.RenderHostsFile()
+	fmt.Println(hfData)
+	err := hosts.Save()
+	if err != nil {
+		fmt.Printf("Failed to update /etc/hosts: %s\n", err.Error())
+	}
+
+	fmt.Printf("Starting timer for %s\n", duration.String())
+	select {
+	case <-timersCtx.Done():
+		fmt.Printf("Cancelling timer for %s\n", duration.String())
+	case <-time.Tick(duration):
+		c.Reply(fmt.Sprintf("%s timer finished...", duration.String()))
+	}
+
+	hosts.AddHosts("127.0.0.1", []string{"youtube.com", "www.youtube.com"})
+	hfData = hosts.RenderHostsFile()
+	fmt.Println(hfData)
+	err = hosts.Save()
+	if err != nil {
+		fmt.Printf("Failed to update /etc/hosts: %s\n", err.Error())
+	}
 }

@@ -20,6 +20,8 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 		os.Exit(1)
 	}
 	fmt.Println("Storage opened")
+	storage.Test()
+	os.Exit(1)
 
 	for {
 		select {
@@ -33,6 +35,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 			return
 
 		case <-time.Tick(time.Second * 30):
+			fmt.Printf("Active Application: %s\n", activeApplication)
 			activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
 			storage.DumpTheUsage()
 
@@ -46,6 +49,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 			case types.Event:
 				event := command.(types.NewAppEvent)
 				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
+				fmt.Printf("Active Application changed: %s -> %s\n", activeApplication, event.AppName)
 				activeApplication = event.AppName
 			}
 		}

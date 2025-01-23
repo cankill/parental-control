@@ -14,15 +14,23 @@ import (
 	"github.com/progrium/darwinkit/macos"
 	"github.com/progrium/darwinkit/macos/appkit"
 	"github.com/progrium/darwinkit/macos/foundation"
+	"github.com/txn2/txeh"
 )
 
 var appKey = foundation.NewStringWithString("NSWorkspaceApplicationKey")
 
 func main() {
 	macos.RunApp(func(app appkit.Application, delegate *appkit.ApplicationDelegate) {
+		// Open /etc/hosts file for managing
+		hosts, err := txeh.NewHostsDefault()
+		if err != nil {
+			panic(err)
+		}
+
 		wg := sync.WaitGroup{}
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		ctx = context.WithValue(ctx, types.WgKey{}, &wg)
+		ctx = context.WithValue(ctx, types.HostsKey{}, hosts)
 
 		statisticsCommandsChannel := make(chan types.AppCommand)
 		sigs := make(chan os.Signal, 1)

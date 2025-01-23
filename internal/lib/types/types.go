@@ -10,6 +10,7 @@ import (
 )
 
 type WgKey struct{}
+type HostsKey struct{}
 
 type AppInfo struct {
 	Identity string
