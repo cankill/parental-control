@@ -70,39 +70,29 @@ func (s *StatsStorage) increaseAppUsageTime(bucket string, appName string, perio
 func (s *StatsStorage) GetStatisticsCurrentHour() types.AppInfos {
 	now := time.Now()
 	bucket := now.Format(TruncatedToHour)
-	return s.CalculateStatistics(bucket)
+	return s.GetStatistics(bucket)
 }
 
-func (s *StatsStorage) CalculateStatistics(bucketName string) types.AppInfos {
+func (s *StatsStorage) DumpBucket(bucketName string) {
+	fmt.Printf("Dump the bucket: %s\n", bucketName)
+	statistics := s.GetStatistics(bucketName)
+	fmt.Println(statistics.FormatTable())
+}
+
+func (s *StatsStorage) GetStatistics(bucketName string) types.AppInfos {
 	values := s.localStorage.GetValues(bucketName)
-	return mapToAppInfos(values)
-}
-
-func (s *StatsStorage) DumpBucket(bucket string) {
-	fmt.Printf("Dump the bucket: %s\n", bucket)
-	values := s.localStorage.GetValues(bucket)
 	statistics := mapToAppInfos(values)
 	statistics.SortByDurationDesc()
-	fmt.Println(statistics.FormatTable())
+	return statistics
 }
 
 func (s *StatsStorage) DumpTheUsage() {
 	now := time.Now()
 	// for range 5 {
 	bucket := now.Format(TruncatedToHour)
-	s.DumpHour(bucket)
+	s.DumpBucket(bucket)
 	// now = now.Add(-1 * time.Hour)
 	// }
-}
-
-func (s *StatsStorage) DumpHour(bucket string) {
-	fmt.Printf("Dump the usage for the current hour: %s\n", bucket)
-	values := s.localStorage.GetValues(bucket)
-
-	statistics := mapToAppInfos(values)
-
-	statistics.SortByDurationDesc()
-	fmt.Println(statistics.FormatTable())
 }
 
 func mapToAppInfos(values map[string]string) types.AppInfos {

@@ -21,6 +21,7 @@ var appKey = foundation.NewStringWithString("NSWorkspaceApplicationKey")
 
 func main() {
 	macos.RunApp(func(app appkit.Application, delegate *appkit.ApplicationDelegate) {
+		// env := config.MustLoad()
 		// Open /etc/hosts file for managing
 		hosts, err := txeh.NewHostsDefault()
 		if err != nil {
@@ -31,6 +32,7 @@ func main() {
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		ctx = context.WithValue(ctx, types.WgKey{}, &wg)
 		ctx = context.WithValue(ctx, types.HostsKey{}, hosts)
+		// ctx = context.WithValue(ctx, types.EnvKey{}, env)
 
 		statisticsCommandsChannel := make(chan types.AppCommand)
 		sigs := make(chan os.Signal, 1)

@@ -11,6 +11,7 @@ import (
 
 type WgKey struct{}
 type HostsKey struct{}
+type EnvKey struct{}
 
 type AppInfo struct {
 	Identity string
