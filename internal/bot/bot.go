@@ -62,7 +62,7 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 		statisticsResponse := <-responseChan
 
 		statisticsResponse.AppInfos.SortByDurationDesc()
-		statisticsTable := "```\n" + "      For: " + statisticsResponse.TimeStamp + "\n\n" + statisticsResponse.AppInfos.FormatTable() + "\n```"
+		statisticsTable := "```\n" + "  For: " + statisticsResponse.TimeStamp + "\n\n" + statisticsResponse.AppInfos.FormatTable() + "\n```"
 		keyboard := makeStatisticsKeyboard("aaa", "")
 		return c.Send(statisticsTable, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, ReplyMarkup: keyboard})
 	})
