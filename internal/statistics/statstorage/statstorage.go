@@ -73,9 +73,16 @@ func (s *StatsStorage) GetStatisticsCurrentHour() types.AppInfos {
 	return s.GetStatistics(bucket)
 }
 
+func (s *StatsStorage) GetStatisticsShifted(shiftHours time.Duration) *types.AppInfoResponse {
+	now := time.Now().Add(-shiftHours * time.Hour)
+	bucket := now.Format(TruncatedToHour)
+	statistics := s.GetStatistics(bucket)
+	return &types.AppInfoResponse{AppInfos: statistics, TimeStamp: bucket}
+}
+
 func (s *StatsStorage) DumpBucket(bucketName string) {
-	fmt.Printf("Dump the bucket: %s\n", bucketName)
 	statistics := s.GetStatistics(bucketName)
+	fmt.Println(bucketName)
 	fmt.Println(statistics.FormatTable())
 }
 

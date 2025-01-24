@@ -1,5 +1,7 @@
 package types
 
+import "time"
+
 type AppCommandType int
 
 type AppCommand interface {
@@ -12,7 +14,8 @@ const (
 )
 
 type RequestCommand struct {
-	ResponseChan chan<- AppInfos
+	Shift        time.Duration
+	ResponseChan chan<- *AppInfoResponse
 }
 
 func (sc RequestCommand) Type() AppCommandType {

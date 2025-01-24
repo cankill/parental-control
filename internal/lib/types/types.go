@@ -28,6 +28,11 @@ func (ac AppInfo) Table() []string {
 
 type AppInfos []AppInfo
 
+type AppInfoResponse struct {
+	AppInfos  AppInfos
+	TimeStamp string
+}
+
 func (acs AppInfos) SortByDuration() {
 	sort.Slice(acs, func(i, j int) bool {
 		return acs[i].Duration < acs[j].Duration

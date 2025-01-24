@@ -57,14 +57,14 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	// b.Use(middleware.Logger())
 
 	b.Handle("/status", func(c tele.Context) error {
-		responseChan := make(chan types.AppInfos)
-		requests <- types.RequestCommand{ResponseChan: responseChan}
-		statistics := <-responseChan
+		responseChan := make(chan *types.AppInfoResponse)
+		requests <- types.RequestCommand{ResponseChan: responseChan, Shift: 0}
+		statisticsResponse := <-responseChan
 
-		statistics.SortByDurationDesc()
-		statisticsTable := "```\n" + statistics.FormatTable() + "\n```"
-
-		return c.Send(statisticsTable, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2})
+		statisticsResponse.AppInfos.SortByDurationDesc()
+		statisticsTable := "```\n" + "      For: " + statisticsResponse.TimeStamp + "\n\n" + statisticsResponse.AppInfos.FormatTable() + "\n```"
+		keyboard := makeStatisticsKeyboard("aaa", "")
+		return c.Send(statisticsTable, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, ReplyMarkup: keyboard})
 	})
 
 	b.Handle("/screen", func(c tele.Context) error {
@@ -124,7 +124,7 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 			timersCancelFunc()
 		}
 		blockHosts(timersCtx, "127.0.0.1", "youtube.com", "www.youtube.com")
-		c.Edit("Youtube closed")
+		c.Edit("Youtube blocked")
 		return c.Respond()
 	})
 
@@ -134,7 +134,7 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 			timersCancelFunc()
 		}
 		unblockHosts(timersCtx, "youtube.com", "www.youtube.com")
-		c.Edit("Youtube closed")
+		c.Edit("Youtube unblocked")
 		return c.Respond()
 	})
 
@@ -174,4 +174,21 @@ func unblockHosts(timersCtx context.Context, hosts ...string) {
 	if err != nil {
 		fmt.Printf("Failed to update /etc/hosts: %s\n", err.Error())
 	}
+}
+
+func makeStatisticsKeyboard(prev string, next string) *tele.ReplyMarkup {
+	btns := []tele.Btn{}
+	keyboard := &tele.ReplyMarkup{}
+	if len(prev) > 0 {
+		btns = append(btns, keyboard.Data("< "+prev, "prev"))
+	}
+	if len(next) > 0 {
+		btns = append(btns, keyboard.Data(next+" >", "prev"))
+	}
+
+	keyboard.Inline(
+		keyboard.Row(btns...),
+	)
+
+	return keyboard
 }
