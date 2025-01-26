@@ -12,8 +12,9 @@ type Env struct {
 }
 
 func MustLoad() *Env {
+	envFile := os.Getenv("PARENTAL_CONTROL_ENV")
 	env := Env{}
-	err := cleanenv.ReadConfig("./env", &env)
+	err := cleanenv.ReadConfig(envFile, &env)
 	if err != nil {
 		fmt.Printf("Can't parse .env file: %s", err.Error())
 		os.Exit(1)
