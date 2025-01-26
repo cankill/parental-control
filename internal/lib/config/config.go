@@ -8,7 +8,7 @@ import (
 )
 
 type Env struct {
-	BotToken string `env:"BOT_TOKEN" env-requires:"true"`
+	BotToken string `env:"TG_BOT_TOKEN" env-requires:"true"`
 }
 
 func MustLoad() *Env {
