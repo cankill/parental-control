@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"parental-control/internal/lib/config"
 	"parental-control/internal/lib/types"
 	"sync"
 	"time"
@@ -20,18 +21,18 @@ var (
 	b1Hour     = selector.Data("1 Hour", "1-hour")
 	bBlock     = selector.Data("Block", "block")
 	bUnblock   = selector.Data("Unblock", "un-block")
-	BOT_TOKEN  = "8180855001:AAEBlkFMvDxN3I9fQ2vm7m6wf2yGSSgWf70"
 	cankill    = int64(183358896)
 	admins     = []int64{cankill}
 )
 
 func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	fmt.Println("Running bot")
+	env := ctx.Value(types.EnvKey{}).(*config.Env)
 	timersCtx, timersCancelFunc := context.WithCancel(ctx)
 
 	index := 0
 	pref := tele.Settings{
-		Token:  BOT_TOKEN,
+		Token:  env.BotToken,
 		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
 	}
 
@@ -68,8 +69,8 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	})
 
 	b.Handle("/screen", func(c tele.Context) error {
-		fname := fmt.Sprintf("/tmp/pc/capture-%d.png", index)
-		cmd := exec.Command("/usr/sbin/screencapture", fname)
+		fname := fmt.Sprintf("/tmp/pc/capture-%d.jpg", index)
+		cmd := exec.Command("/usr/sbin/screencapture", "-t", "jpg", "-x", fname)
 		if err := cmd.Run(); err != nil {
 			fmt.Println("Error: ", err)
 			return c.Send(fmt.Sprintf("Error : %s", err))
