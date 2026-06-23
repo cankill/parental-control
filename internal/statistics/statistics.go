@@ -16,6 +16,9 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 	storage := statstorage.Open()
 	fmt.Println("Storage opened")
 
+	ticker := time.NewTicker(time.Second * 30)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -26,7 +29,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 			wg.Done()
 			return
 
-		case <-time.Tick(time.Second * 30):
+		case <-ticker.C:
 			fmt.Printf("Active Application: %s\n", activeApplication)
 			activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
 			storage.DumpTheUsage()
@@ -36,7 +39,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 			case types.Command:
 				request := command.(types.RequestCommand)
 				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
-				request.ResponseChan <- storage.GetStatisticsShifted(request.Shift)
+				request.ResponseChan <- storage.GetStatisticsShifted(request.ShiftHours)
 
 			case types.Event:
 				event := command.(types.NewAppEvent)

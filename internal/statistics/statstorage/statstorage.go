@@ -2,6 +2,7 @@ package statstorage
 
 import (
 	"fmt"
+	"os"
 	"parental-control/internal/lib/storage/local/diskvstorage"
 	"parental-control/internal/lib/types"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 )
 
 const (
-	DbPath          = "./database"
+	defaultDbPath   = "./database"
 	TruncatedToHour = "2006-01-02T15"
 )
 
@@ -23,20 +24,29 @@ type StatsStorage struct {
 
 var capitalizer = cases.Title(language.English)
 
+// dbPath возвращает каталог БД: из PARENTAL_CONTROL_DB, иначе относительный
+// defaultDbPath (зависит от cwd, который в проде задаёт WorkingDirectory в plist).
+func dbPath() string {
+	if p := os.Getenv("PARENTAL_CONTROL_DB"); p != "" {
+		return p
+	}
+	return defaultDbPath
+}
+
 func Open() *StatsStorage {
-	localStorage := diskvstorage.OpenStorage(DbPath)
+	localStorage := diskvstorage.OpenStorage(dbPath())
 	return &StatsStorage{localStorage: localStorage}
 }
 
 func (s *StatsStorage) IncreaseStatistics(appName string, fromDate time.Time) time.Time {
 	toDate := time.Now()
-	hours := toDate.Truncate(time.Hour).Sub(fromDate.Truncate(time.Hour)).Hours() + 1
+	hours := int(toDate.Truncate(time.Hour).Sub(fromDate.Truncate(time.Hour))/time.Hour) + 1
 	for hours > 0 {
 		newToDate := fromDate.Truncate(time.Hour).Add(1 * time.Hour)
 		newToDate = types.Min(newToDate, toDate)
 		s.process(fromDate, newToDate, appName)
 		fromDate = newToDate
-		hours -= 1
+		hours--
 	}
 
 	return toDate
@@ -73,8 +83,8 @@ func (s *StatsStorage) GetStatisticsCurrentHour() types.AppInfos {
 	return s.GetStatistics(bucket)
 }
 
-func (s *StatsStorage) GetStatisticsShifted(shiftHours time.Duration) *types.AppInfoResponse {
-	now := time.Now().Add(-shiftHours * time.Hour)
+func (s *StatsStorage) GetStatisticsShifted(shiftHours int) *types.AppInfoResponse {
+	now := time.Now().Add(-time.Duration(shiftHours) * time.Hour)
 	bucket := now.Format(TruncatedToHour)
 	statistics := s.GetStatistics(bucket)
 	return &types.AppInfoResponse{AppInfos: statistics, TimeStamp: bucket}

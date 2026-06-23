@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/tw"
 )
 
 type WgKey struct{}
-type HostsKey struct{}
 type EnvKey struct{}
 
 type AppInfo struct {
@@ -47,17 +47,20 @@ func (acs AppInfos) SortByDurationDesc() {
 
 func (acs AppInfos) FormatTable() string {
 	var buf bytes.Buffer
-	table := tablewriter.NewWriter(&buf)
-	table.SetHeader([]string{"Application", "Time spent"})
-	table.SetBorder(false)
+	// tablewriter v1: рамки отключаем через WithBorders(tw.Off); Header/Footer/
+	// Append/Render заменили SetHeader/SetFooter/Append/Render из v0.
+	table := tablewriter.NewTable(&buf, tablewriter.WithBorders(tw.Border{
+		Left: tw.Off, Right: tw.Off, Top: tw.Off, Bottom: tw.Off,
+	}))
+	table.Header("Application", "Time spent")
 	total := time.Duration(0)
 
 	for _, appInfo := range acs {
-		table.Append(appInfo.Table())
+		_ = table.Append(appInfo.Table())
 		total += appInfo.Duration
 	}
 
-	table.SetFooter([]string{"Total", total.String()})
-	table.Render()
+	table.Footer("Total", total.String())
+	_ = table.Render()
 	return buf.String()
 }

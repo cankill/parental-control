@@ -1,7 +1,5 @@
 package types
 
-import "time"
-
 type AppCommandType int
 
 type AppCommand interface {
@@ -14,7 +12,8 @@ const (
 )
 
 type RequestCommand struct {
-	Shift        time.Duration
+	// ShiftHours — на сколько часов назад от текущего часа взять статистику (0 = сейчас).
+	ShiftHours   int
 	ResponseChan chan<- *AppInfoResponse
 }
 

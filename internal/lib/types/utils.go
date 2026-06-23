@@ -3,6 +3,9 @@ package types
 import "time"
 
 func Last(ss []string) string {
+	if len(ss) == 0 {
+		return ""
+	}
 	return ss[len(ss)-1]
 }
 

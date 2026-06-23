@@ -15,7 +15,6 @@ import (
 	"github.com/progrium/darwinkit/macos"
 	"github.com/progrium/darwinkit/macos/appkit"
 	"github.com/progrium/darwinkit/macos/foundation"
-	"github.com/txn2/txeh"
 )
 
 var appKey = foundation.NewStringWithString("NSWorkspaceApplicationKey")
@@ -23,16 +22,12 @@ var appKey = foundation.NewStringWithString("NSWorkspaceApplicationKey")
 func main() {
 	macos.RunApp(func(app appkit.Application, delegate *appkit.ApplicationDelegate) {
 		env := config.MustLoad()
-		// Open /etc/hosts file for managing
-		hosts, err := txeh.NewHostsDefault()
-		if err != nil {
-			panic(err)
-		}
 
+		// Блокировка /etc/hosts вынесена в privileged helper (LaunchDaemon, root);
+		// основное приложение обращается к нему через сокет из пакета bot.
 		wg := sync.WaitGroup{}
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		ctx = context.WithValue(ctx, types.WgKey{}, &wg)
-		ctx = context.WithValue(ctx, types.HostsKey{}, hosts)
 		ctx = context.WithValue(ctx, types.EnvKey{}, env)
 
 		statisticsCommandsChannel := make(chan types.AppCommand)
@@ -54,10 +49,13 @@ func main() {
 			fmt.Println()
 			fmt.Println("Stopping Mac OS X Application")
 
+			// Отменяем контекст и дожидаемся завершения обработчиков. Канал
+			// statisticsCommandsChannel НЕ закрываем: observer ниже продолжает
+			// писать в него до отмены контекста, а закрытие со стороны отправителя
+			// привело бы к панике "send on closed channel".
 			cancelFunc()
 
 			close(sigs)
-			close(statisticsCommandsChannel)
 
 			wg.Wait()
 			app.Terminate(app)
@@ -70,7 +68,11 @@ func main() {
 			foundation.OperationQueue_MainQueue(),
 			func(notification foundation.Notification) {
 				focussedApp := appkit.RunningApplicationFrom(notification.UserInfo().ObjectForKey(appKey).Ptr()).BundleIdentifier()
-				statisticsCommandsChannel <- types.NewAppEvent{AppName: focussedApp}
+				// После отмены контекста получатель уже завершился — не пишем в канал.
+				select {
+				case statisticsCommandsChannel <- types.NewAppEvent{AppName: focussedApp}:
+				case <-ctx.Done():
+				}
 			})
 
 		fmt.Println("Mac OS X Application started")
