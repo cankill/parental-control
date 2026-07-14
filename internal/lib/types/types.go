@@ -33,10 +33,13 @@ type AppInfoResponse struct {
 	TimeStamp string
 	// ShiftHours — на сколько часов назад показаны данные (0 = текущий час).
 	ShiftHours int
-	// HasOlder/HasNewer — есть ли данные глубже в прошлое / ближе к настоящему,
-	// чтобы бот показывал стрелки навигации только в доступную сторону.
-	HasOlder bool
-	HasNewer bool
+	// OlderShift/NewerShift — целевой shift ближайшего непустого часа в прошлое /
+	// к настоящему (пропущенные часы перепрыгиваются). Валиден только если
+	// соответствующий Has*-флаг true. Бот кодирует этот shift в payload стрелки.
+	HasOlder   bool
+	OlderShift int
+	HasNewer   bool
+	NewerShift int
 }
 
 func (acs AppInfos) SortByDuration() {

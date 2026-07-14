@@ -251,22 +251,20 @@ func startYoutubeTimer(c tele.Context, timersCtx context.Context, duration time.
 func renderStatistics(resp *types.AppInfoResponse) (string, *tele.ReplyMarkup) {
 	resp.AppInfos.SortByDurationDesc()
 	text := "```\n" + "  For: " + resp.TimeStamp + "\n\n" + resp.AppInfos.FormatTable() + "\n```"
-	return text, makeStatisticsKeyboard(resp.ShiftHours, resp.HasOlder, resp.HasNewer)
+	return text, makeStatisticsKeyboard(resp)
 }
 
-// makeStatisticsKeyboard строит ряд навигации: стрелки показываются только в ту
-// сторону, где есть данные. Целевой shiftHours кодируется в payload кнопки, чтобы
-// хендлер не хранил состояние между вызовами.
-func makeStatisticsKeyboard(shiftHours int, hasOlder, hasNewer bool) *tele.ReplyMarkup {
+// makeStatisticsKeyboard строит ряд навигации. Стрелка показывается только если в
+// ту сторону есть данные, а её payload — целевой shift ближайшего непустого часа
+// (пропущенные часы уже перепрыгнуты в NearestShift). Хендлер не хранит состояние.
+func makeStatisticsKeyboard(resp *types.AppInfoResponse) *tele.ReplyMarkup {
 	kb := &tele.ReplyMarkup{}
 	btns := []tele.Btn{}
-	if hasOlder {
-		b := kb.Data("‹ Earlier", "stat-prev", strconv.Itoa(shiftHours+1))
-		btns = append(btns, b)
+	if resp.HasOlder {
+		btns = append(btns, kb.Data("‹ Earlier", "stat-prev", strconv.Itoa(resp.OlderShift)))
 	}
-	if hasNewer {
-		b := kb.Data("Later ›", "stat-next", strconv.Itoa(shiftHours-1))
-		btns = append(btns, b)
+	if resp.HasNewer {
+		btns = append(btns, kb.Data("Later ›", "stat-next", strconv.Itoa(resp.NewerShift)))
 	}
 	if len(btns) == 0 {
 		return kb

@@ -90,15 +90,34 @@ func (s *StatsStorage) GetStatisticsShifted(shiftHours int) *types.AppInfoRespon
 	return &types.AppInfoResponse{AppInfos: statistics, TimeStamp: bucket}
 }
 
-// HasDataForShift сообщает, есть ли непустой bucket на смещении shiftHours часов
-// назад — используется, чтобы показывать стрелки навигации только в ту сторону,
-// где реально есть данные. Отрицательный shift (в будущее) всегда false.
-func (s *StatsStorage) HasDataForShift(shiftHours int) bool {
-	if shiftHours < 0 {
-		return false
+// NearestShift находит ближайший shift (часов назад от текущего часа) с реальными
+// данными относительно fromShift: older=true — глубже в прошлое (больший shift),
+// older=false — ближе к настоящему (меньший shift, не ниже 0). Пропущенные часы
+// (дыры в истории) перепрыгиваются. Второе значение — найден ли такой bucket.
+func (s *StatsStorage) NearestShift(fromShift int, older bool) (int, bool) {
+	currentHour := time.Now().Truncate(time.Hour)
+	best := -1
+	for _, bucket := range s.localStorage.ListBuckets() {
+		t, err := time.ParseInLocation(TruncatedToHour, bucket, time.Local)
+		if err != nil {
+			continue // не часовой bucket (напр. префиксные домены) — пропускаем
+		}
+		shift := int(currentHour.Sub(t.Truncate(time.Hour)) / time.Hour)
+		if shift < 0 {
+			continue
+		}
+		if older && shift > fromShift {
+			if best == -1 || shift < best { // ближайший больший
+				best = shift
+			}
+		}
+		if !older && shift < fromShift {
+			if shift > best { // ближайший меньший
+				best = shift
+			}
+		}
 	}
-	bucket := time.Now().Add(-time.Duration(shiftHours) * time.Hour).Format(TruncatedToHour)
-	return len(s.localStorage.GetValues(bucket)) > 0
+	return best, best != -1
 }
 
 func (s *StatsStorage) DumpBucket(bucketName string) {
