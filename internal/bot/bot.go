@@ -178,6 +178,25 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	b.Handle(&btnStatPrev, navHandler)
 	b.Handle(&btnStatNext, navHandler)
 
+	// /daily — агрегированная статистика за последние 24 часа.
+	b.Handle("/daily", func(c tele.Context) error {
+		responseChan := make(chan *types.AppInfoResponse, 1)
+		select {
+		case requests <- types.PeriodRequest{FromShift: 0, ToShift: 23, ResponseChan: responseChan}:
+		case <-ctx.Done():
+			return c.Send("Statistics unavailable (shutting down)")
+		}
+		var resp *types.AppInfoResponse
+		select {
+		case resp = <-responseChan:
+		case <-ctx.Done():
+			return c.Send("Statistics unavailable (shutting down)")
+		}
+		resp.AppInfos.SortByDurationDesc()
+		text := "```\n" + "  Last 24h: " + resp.TimeStamp + "\n\n" + resp.AppInfos.FormatTable() + "\n```"
+		return c.Send(text, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2})
+	})
+
 	b.Handle("/screen", func(c tele.Context) error {
 		if err := os.MkdirAll(screenshotDir, 0700); err != nil {
 			return c.Send(fmt.Sprintf("Error: %s", err))

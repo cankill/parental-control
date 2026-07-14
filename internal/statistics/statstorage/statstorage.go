@@ -133,6 +133,32 @@ func (s *StatsStorage) GetStatistics(bucketName string) types.AppInfos {
 	return statistics
 }
 
+// GetStatisticsPeriod агрегирует статистику по всем часовым bucket'ам в диапазоне
+// смещений [fromShift, toShift] (в часах назад, включительно), суммируя время
+// каждого приложения по всем часам. TimeStamp ответа — человекочитаемый диапазон.
+func (s *StatsStorage) GetStatisticsPeriod(fromShift, toShift int) *types.AppInfoResponse {
+	if fromShift > toShift {
+		fromShift, toShift = toShift, fromShift
+	}
+	totals := map[string]time.Duration{}
+	for shift := fromShift; shift <= toShift; shift++ {
+		bucket := time.Now().Add(-time.Duration(shift) * time.Hour).Format(TruncatedToHour)
+		for _, ai := range s.GetStatistics(bucket) {
+			totals[ai.Identity] += ai.Duration
+		}
+	}
+
+	stats := make(types.AppInfos, 0, len(totals))
+	for name, dur := range totals {
+		stats = append(stats, types.AppInfo{Identity: name, Duration: dur})
+	}
+	stats.SortByDurationDesc()
+
+	from := time.Now().Add(-time.Duration(toShift) * time.Hour).Format(TruncatedToHour)
+	to := time.Now().Add(-time.Duration(fromShift) * time.Hour).Format(TruncatedToHour)
+	return &types.AppInfoResponse{AppInfos: stats, TimeStamp: from + " … " + to}
+}
+
 func (s *StatsStorage) DumpTheUsage() {
 	now := time.Now()
 	// for range 5 {

@@ -9,6 +9,7 @@ type AppCommand interface {
 const (
 	Command AppCommandType = iota
 	Event
+	PeriodCommand
 )
 
 type RequestCommand struct {
@@ -19,6 +20,18 @@ type RequestCommand struct {
 
 func (sc RequestCommand) Type() AppCommandType {
 	return Command
+}
+
+// PeriodRequest запрашивает агрегированную статистику за диапазон часов
+// [FromShift, ToShift] назад (включительно). Например {0, 23} — последние сутки.
+type PeriodRequest struct {
+	FromShift    int
+	ToShift      int
+	ResponseChan chan<- *AppInfoResponse
+}
+
+func (pc PeriodRequest) Type() AppCommandType {
+	return PeriodCommand
 }
 
 type NewAppEvent struct {

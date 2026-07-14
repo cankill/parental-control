@@ -45,6 +45,11 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				resp.NewerShift, resp.HasNewer = storage.NearestShift(request.ShiftHours, false)
 				request.ResponseChan <- resp
 
+			case types.PeriodCommand:
+				request := command.(types.PeriodRequest)
+				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
+				request.ResponseChan <- storage.GetStatisticsPeriod(request.FromShift, request.ToShift)
+
 			case types.Event:
 				event := command.(types.NewAppEvent)
 				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
