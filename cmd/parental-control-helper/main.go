@@ -25,9 +25,12 @@ func main() {
 		log.Fatalf("listen %s: %v", helper.SockPath, err)
 	}
 
-	// 0600 + владелец root: писать в сокет может только root. UID отправителя
-	// дополнительно проверяется в helper.HandleConnection (LOCAL_PEERCRED).
-	if err := os.Chmod(helper.SockPath, 0600); err != nil {
+	// 0666: сокет создаёт root, а подключается непривилегированный агент (mark),
+	// поэтому connect должен быть разрешён всем. Реальная защита — проверка UID
+	// отправителя (LOCAL_PEERCRED, только 0/501) в helper.HandleConnection и
+	// whitelist доменов. Права 0600 запрещали бы mark даже открыть сокет
+	// (connect: permission denied).
+	if err := os.Chmod(helper.SockPath, 0666); err != nil {
 		log.Fatalf("chmod socket: %v", err)
 	}
 
