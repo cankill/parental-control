@@ -10,6 +10,7 @@ import (
 	"parental-control/internal/lib/config"
 	"parental-control/internal/lib/types"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,6 +29,12 @@ var (
 	bUnblock   = selector.Data("Unblock", "un-block")
 	// defaultAdmins — фолбэк, если TG_ADMIN_IDS не задан в окружении.
 	defaultAdmins = []int64{183358896}
+
+	// Кнопки навигации по часам под /status. Unique задаёт callback-роут, а
+	// конкретный целевой shiftHours передаётся в payload (Data) при отрисовке.
+	statNav       = &tele.ReplyMarkup{}
+	btnStatPrev   = statNav.Data("‹ Earlier", "stat-prev")
+	btnStatNext   = statNav.Data("Later ›", "stat-next")
 )
 
 // screenshotDir — каталог для временных снимков экрана (/screen).
@@ -127,28 +134,49 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	b.Use(middleware.Whitelist(admins...))
 	// b.Use(middleware.Logger())
 
-	b.Handle("/status", func(c tele.Context) error {
-		// Буфер 1 + select с ctx.Done(): не блокируемся навсегда, если получатель
-		// статистики уже завершился при шатдауне.
+	// fetchStatistics запрашивает у горутины статистики срез за shiftHours назад.
+	fetchStatistics := func(shiftHours int) (*types.AppInfoResponse, error) {
 		responseChan := make(chan *types.AppInfoResponse, 1)
 		select {
-		case requests <- types.RequestCommand{ResponseChan: responseChan, ShiftHours: 0}:
+		case requests <- types.RequestCommand{ResponseChan: responseChan, ShiftHours: shiftHours}:
 		case <-ctx.Done():
-			return c.Send("Statistics unavailable (shutting down)")
+			return nil, fmt.Errorf("shutting down")
 		}
-
-		var statisticsResponse *types.AppInfoResponse
 		select {
-		case statisticsResponse = <-responseChan:
+		case resp := <-responseChan:
+			return resp, nil
 		case <-ctx.Done():
+			return nil, fmt.Errorf("shutting down")
+		}
+	}
+
+	b.Handle("/status", func(c tele.Context) error {
+		resp, err := fetchStatistics(0)
+		if err != nil {
 			return c.Send("Statistics unavailable (shutting down)")
 		}
-
-		statisticsResponse.AppInfos.SortByDurationDesc()
-		statisticsTable := "```\n" + "  For: " + statisticsResponse.TimeStamp + "\n\n" + statisticsResponse.AppInfos.FormatTable() + "\n```"
-		keyboard := makeStatisticsKeyboard("aaa", "")
-		return c.Send(statisticsTable, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, ReplyMarkup: keyboard})
+		text, kb := renderStatistics(resp)
+		return c.Send(text, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, ReplyMarkup: kb})
 	})
+
+	// Навигация по часам: prev = глубже в прошлое (shift+1), next = ближе к сейчас
+	// (shift-1). Целевой shift берётся из payload callback'а. Сообщение
+	// перерисовывается на месте через c.Edit.
+	navHandler := func(c tele.Context) error {
+		shift, _ := strconv.Atoi(c.Data())
+		if shift < 0 {
+			shift = 0
+		}
+		resp, err := fetchStatistics(shift)
+		if err != nil {
+			return c.Respond()
+		}
+		text, kb := renderStatistics(resp)
+		_ = c.Edit(text, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, ReplyMarkup: kb})
+		return c.Respond()
+	}
+	b.Handle(&btnStatPrev, navHandler)
+	b.Handle(&btnStatNext, navHandler)
 
 	b.Handle("/screen", func(c tele.Context) error {
 		if err := os.MkdirAll(screenshotDir, 0700); err != nil {
@@ -218,19 +246,31 @@ func startYoutubeTimer(c tele.Context, timersCtx context.Context, duration time.
 	}
 }
 
-func makeStatisticsKeyboard(prev string, next string) *tele.ReplyMarkup {
+// renderStatistics формирует текст таблицы статистики и клавиатуру навигации
+// для конкретного среза (resp несёт TimeStamp, ShiftHours и флаги HasOlder/HasNewer).
+func renderStatistics(resp *types.AppInfoResponse) (string, *tele.ReplyMarkup) {
+	resp.AppInfos.SortByDurationDesc()
+	text := "```\n" + "  For: " + resp.TimeStamp + "\n\n" + resp.AppInfos.FormatTable() + "\n```"
+	return text, makeStatisticsKeyboard(resp.ShiftHours, resp.HasOlder, resp.HasNewer)
+}
+
+// makeStatisticsKeyboard строит ряд навигации: стрелки показываются только в ту
+// сторону, где есть данные. Целевой shiftHours кодируется в payload кнопки, чтобы
+// хендлер не хранил состояние между вызовами.
+func makeStatisticsKeyboard(shiftHours int, hasOlder, hasNewer bool) *tele.ReplyMarkup {
+	kb := &tele.ReplyMarkup{}
 	btns := []tele.Btn{}
-	keyboard := &tele.ReplyMarkup{}
-	if len(prev) > 0 {
-		btns = append(btns, keyboard.Data("< "+prev, "prev"))
+	if hasOlder {
+		b := kb.Data("‹ Earlier", "stat-prev", strconv.Itoa(shiftHours+1))
+		btns = append(btns, b)
 	}
-	if len(next) > 0 {
-		btns = append(btns, keyboard.Data(next+" >", "prev"))
+	if hasNewer {
+		b := kb.Data("Later ›", "stat-next", strconv.Itoa(shiftHours-1))
+		btns = append(btns, b)
 	}
-
-	keyboard.Inline(
-		keyboard.Row(btns...),
-	)
-
-	return keyboard
+	if len(btns) == 0 {
+		return kb
+	}
+	kb.Inline(kb.Row(btns...))
+	return kb
 }

@@ -2,6 +2,7 @@ package diskvstorage
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/peterbourgon/diskv/v3"
@@ -47,19 +48,28 @@ func (s *LocalStorage) GetValue(bucketName string, key string) string {
 
 func (s *LocalStorage) DumpBuckets() {
 	fmt.Print("Buckets: ")
-	cancel := make(<-chan struct{})
-	keys := s.db.Keys(cancel)
-	buckets := map[string]bool{}
-	for key := range keys {
-		paths, _ := splitBucket(key)
-		buckets[strings.Join(paths, "/")] = true
-	}
-
-	for bucket := range buckets {
+	for _, bucket := range s.ListBuckets() {
 		fmt.Printf("%s, ", bucket)
 	}
-
 	fmt.Println()
+}
+
+// ListBuckets возвращает отсортированный список всех bucket'ов в хранилище.
+func (s *LocalStorage) ListBuckets() []string {
+	cancel := make(<-chan struct{})
+	keys := s.db.Keys(cancel)
+	seen := map[string]bool{}
+	for key := range keys {
+		paths, _ := splitBucket(key)
+		seen[strings.Join(paths, "/")] = true
+	}
+
+	buckets := make([]string, 0, len(seen))
+	for bucket := range seen {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+	return buckets
 }
 
 func (s *LocalStorage) DumpBucket(bucketName string) {

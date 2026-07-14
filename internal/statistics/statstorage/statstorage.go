@@ -90,6 +90,17 @@ func (s *StatsStorage) GetStatisticsShifted(shiftHours int) *types.AppInfoRespon
 	return &types.AppInfoResponse{AppInfos: statistics, TimeStamp: bucket}
 }
 
+// HasDataForShift сообщает, есть ли непустой bucket на смещении shiftHours часов
+// назад — используется, чтобы показывать стрелки навигации только в ту сторону,
+// где реально есть данные. Отрицательный shift (в будущее) всегда false.
+func (s *StatsStorage) HasDataForShift(shiftHours int) bool {
+	if shiftHours < 0 {
+		return false
+	}
+	bucket := time.Now().Add(-time.Duration(shiftHours) * time.Hour).Format(TruncatedToHour)
+	return len(s.localStorage.GetValues(bucket)) > 0
+}
+
 func (s *StatsStorage) DumpBucket(bucketName string) {
 	statistics := s.GetStatistics(bucketName)
 	fmt.Println(bucketName)

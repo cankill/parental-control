@@ -31,6 +31,12 @@ type AppInfos []AppInfo
 type AppInfoResponse struct {
 	AppInfos  AppInfos
 	TimeStamp string
+	// ShiftHours — на сколько часов назад показаны данные (0 = текущий час).
+	ShiftHours int
+	// HasOlder/HasNewer — есть ли данные глубже в прошлое / ближе к настоящему,
+	// чтобы бот показывал стрелки навигации только в доступную сторону.
+	HasOlder bool
+	HasNewer bool
 }
 
 func (acs AppInfos) SortByDuration() {
@@ -49,9 +55,16 @@ func (acs AppInfos) FormatTable() string {
 	var buf bytes.Buffer
 	// tablewriter v1: рамки отключаем через WithBorders(tw.Off); Header/Footer/
 	// Append/Render заменили SetHeader/SetFooter/Append/Render из v0.
-	table := tablewriter.NewTable(&buf, tablewriter.WithBorders(tw.Border{
-		Left: tw.Off, Right: tw.Off, Top: tw.Off, Bottom: tw.Off,
-	}))
+	// WithColumnMax + WrapTruncate: длинные имена (напр. 32-символьные Chrome
+	// extension ID, которые прилетают как bundle identifier) обрезаются с "…",
+	// иначе колонка растягивается и ломает таблицу на узком экране Telegram.
+	table := tablewriter.NewTable(&buf,
+		tablewriter.WithBorders(tw.Border{
+			Left: tw.Off, Right: tw.Off, Top: tw.Off, Bottom: tw.Off,
+		}),
+		tablewriter.WithColumnWidths(tw.Mapper[int, int]{0: 22, 1: 14}),
+		tablewriter.WithRowAutoWrap(tw.WrapTruncate),
+	)
 	table.Header("Application", "Time spent")
 	total := time.Duration(0)
 

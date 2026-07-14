@@ -39,7 +39,11 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 			case types.Command:
 				request := command.(types.RequestCommand)
 				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
-				request.ResponseChan <- storage.GetStatisticsShifted(request.ShiftHours)
+				resp := storage.GetStatisticsShifted(request.ShiftHours)
+				resp.ShiftHours = request.ShiftHours
+				resp.HasOlder = storage.HasDataForShift(request.ShiftHours + 1)
+				resp.HasNewer = request.ShiftHours > 0
+				request.ResponseChan <- resp
 
 			case types.Event:
 				event := command.(types.NewAppEvent)
