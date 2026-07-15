@@ -3,11 +3,38 @@ package statistics
 import (
 	"context"
 	"fmt"
+	"parental-control/internal/appinfo"
 	"parental-control/internal/lib/types"
 	"parental-control/internal/statistics/statstorage"
+	"strings"
 	"sync"
 	"time"
 )
+
+// formatAppInfo превращает результаты поиска по словарю в читаемый текст для /info.
+func formatAppInfo(name string, infos []appinfo.Info) string {
+	if len(infos) == 0 {
+		return fmt.Sprintf("No info for %q yet (tracked apps only).", name)
+	}
+	var b strings.Builder
+	for i, info := range infos {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "%s\n", statstorage.DisplayName(info.BundleID))
+		fmt.Fprintf(&b, "  bundle: %s\n", info.BundleID)
+		if info.Name != "" {
+			fmt.Fprintf(&b, "  name:   %s\n", info.Name)
+		}
+		if info.Version != "" {
+			fmt.Fprintf(&b, "  ver:    %s\n", info.Version)
+		}
+		if info.Path != "" {
+			fmt.Fprintf(&b, "  path:   %s\n", info.Path)
+		}
+	}
+	return b.String()
+}
 
 func Handler(ctx context.Context, activeApplication string, commandsChannel <-chan types.AppCommand) {
 	fmt.Println("Running handler")
@@ -43,18 +70,40 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				resp.ShiftHours = request.ShiftHours
 				resp.OlderShift, resp.HasOlder = storage.NearestShift(request.ShiftHours, true)
 				resp.NewerShift, resp.HasNewer = storage.NearestShift(request.ShiftHours, false)
+				if request.ShiftHours == 0 {
+					resp.ActiveApp = statstorage.DisplayName(activeApplication)
+				}
 				request.ResponseChan <- resp
 
-			case types.PeriodCommand:
-				request := command.(types.PeriodRequest)
+			case types.DayCommand:
+				request := command.(types.DayRequest)
 				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
-				request.ResponseChan <- storage.GetStatisticsPeriod(request.FromShift, request.ToShift)
+				resp := storage.GetStatisticsDay(request.DayShift)
+				resp.OlderShift, resp.HasOlder = storage.NearestDayShift(request.DayShift, true)
+				resp.NewerShift, resp.HasNewer = storage.NearestDayShift(request.DayShift, false)
+				request.ResponseChan <- resp
+
+			case types.DomainCommand:
+				request := command.(types.DomainRequest)
+				resp := storage.GetDomainStatistics(request.ShiftHours)
+				resp.OlderShift, resp.HasOlder = storage.NearestDomainShift(request.ShiftHours, true)
+				resp.NewerShift, resp.HasNewer = storage.NearestDomainShift(request.ShiftHours, false)
+				request.ResponseChan <- resp
+
+			case types.DomainEvent:
+				tick := command.(types.DomainTick)
+				storage.AddDomainTime(tick.Domain, tick.Millis)
+
+			case types.AppInfoCommand:
+				query := command.(types.AppInfoQuery)
+				query.ResponseChan <- formatAppInfo(query.Name, storage.FindAppInfoByName(query.Name))
 
 			case types.Event:
 				event := command.(types.NewAppEvent)
 				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
 				fmt.Printf("Active Application changed: %s -> %s\n", activeApplication, event.AppName)
 				activeApplication = event.AppName
+				storage.RememberApp(activeApplication) // словарь для /info (резолв один раз)
 			}
 		}
 	}

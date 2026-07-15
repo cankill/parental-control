@@ -44,6 +44,9 @@ func main() {
 		wg.Add(1)
 		go bot.StartBot(ctx, statisticsCommandsChannel)
 
+		wg.Add(1)
+		go statistics.TrackDomains(ctx, env.UrlPollInterval(), statisticsCommandsChannel)
+
 		go func() {
 			<-sigs
 			fmt.Println()

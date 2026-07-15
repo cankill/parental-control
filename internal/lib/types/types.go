@@ -40,6 +40,9 @@ type AppInfoResponse struct {
 	OlderShift int
 	HasNewer   bool
 	NewerShift int
+	// ActiveApp — отображаемое имя активного сейчас приложения; заполняется только
+	// для текущего часа (ShiftHours==0), чтобы бот пометил его звёздочкой.
+	ActiveApp string
 }
 
 func (acs AppInfos) SortByDuration() {
@@ -55,6 +58,12 @@ func (acs AppInfos) SortByDurationDesc() {
 }
 
 func (acs AppInfos) FormatTable() string {
+	return acs.FormatTableMarked("")
+}
+
+// FormatTableMarked как FormatTable, но помечает строку приложения с именем
+// activeName маркером ● (активное сейчас приложение). Пустой activeName — без пометки.
+func (acs AppInfos) FormatTableMarked(activeName string) string {
 	var buf bytes.Buffer
 	// tablewriter v1: рамки отключаем через WithBorders(tw.Off); Header/Footer/
 	// Append/Render заменили SetHeader/SetFooter/Append/Render из v0.
@@ -72,7 +81,11 @@ func (acs AppInfos) FormatTable() string {
 	total := time.Duration(0)
 
 	for _, appInfo := range acs {
-		_ = table.Append(appInfo.Table())
+		row := appInfo.Table()
+		if activeName != "" && appInfo.Identity == activeName {
+			row[0] = "● " + row[0] // пометка активного приложения
+		}
+		_ = table.Append(row)
 		total += appInfo.Duration
 	}
 
