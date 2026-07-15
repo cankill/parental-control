@@ -20,11 +20,11 @@ type spec struct {
 
 // supported сопоставляет macOS bundle identifier с AppleScript-спецификой браузера.
 var supported = map[string]spec{
-	"com.google.Chrome":     {"Google Chrome", "active tab"},
-	"com.apple.Safari":      {"Safari", "current tab"},
-	"ru.yandex.browser":     {"Yandex", "active tab"},
-	"com.microsoft.edgemac": {"Microsoft Edge", "active tab"},
-	"com.brave.Browser":     {"Brave Browser", "active tab"},
+	"com.google.Chrome":                {"Google Chrome", "active tab"},
+	"com.apple.Safari":                 {"Safari", "current tab"},
+	"ru.yandex.desktop.yandex-browser": {"Yandex", "active tab"},
+	"com.microsoft.edgemac":            {"Microsoft Edge", "active tab"},
+	"com.brave.Browser":                {"Brave Browser", "active tab"},
 }
 
 // IsBrowser сообщает, поддерживается ли получение URL для данного bundle id.

@@ -9,27 +9,72 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
 
 // outputDir — каталог для временных медиа-файлов (тот же, что и для скриншотов).
 const outputDir = "/tmp/pc"
 
-// ffmpegPath ищет ffmpeg в PATH и типовых местах установки на macOS.
+// signedFFmpeg — копия ffmpeg, переподписанная нашей identity (ParentControlSigning)
+// с entitlements camera/mic. Нужна, потому что camera-грант TCC привязан к процессу,
+// открывающему камеру; brew-ffmpeg подписан ad-hoc и НЕ наследует грант агента.
+// Разворачивается и подписывается при деплое (init.sls / codesign.sh).
+const signedFFmpeg = "/opt/parentcontrol/ffmpeg"
+
+// ffmpegPath возвращает путь к ffmpeg: сначала нашу подписанную копию (для доступа
+// к камере/микрофону через TCC-грант нашей identity), затем системный ffmpeg.
 func ffmpegPath() (string, error) {
-	if p, err := exec.LookPath("ffmpeg"); err == nil {
-		return p, nil
-	}
-	for _, p := range []string{"/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"} {
+	candidates := []string{signedFFmpeg, "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"}
+	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 	}
+	if p, err := exec.LookPath("ffmpeg"); err == nil {
+		return p, nil
+	}
 	return "", fmt.Errorf("ffmpeg not found")
 }
 
-// CapturePhoto снимает один кадр с камеры по умолчанию (avfoundation device "0")
-// и возвращает путь к JPEG. Вызывающий обязан удалить файл после отправки.
+// cameraIndex определяет индекс avfoundation-камеры (номер устройства меняется от
+// Mac к Maк, и это НЕ всегда 0 — под 0 может быть "Capture screen"). Парсит
+// -list_devices и возвращает первый видеодевайс, не являющийся screen-capture.
+// При неудаче возвращает "0" как безопасный дефолт.
+func cameraIndex(ff string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, ff, "-f", "avfoundation", "-list_devices", "true", "-i", "").CombinedOutput()
+
+	inVideo := false
+	// Строки вида: [AVFoundation ...] [0] FaceTime HD Camera (Built-in)
+	re := regexp.MustCompile(`\[(\d+)\]\s+(.*)`)
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "video devices") {
+			inVideo = true
+			continue
+		}
+		if strings.Contains(line, "audio devices") {
+			inVideo = false
+			continue
+		}
+		if !inVideo {
+			continue
+		}
+		if m := re.FindStringSubmatch(line); m != nil {
+			name := strings.ToLower(m[2])
+			if strings.Contains(name, "capture screen") {
+				continue // это захват экрана, не камера
+			}
+			return m[1] // первый настоящий видеодевайс (камера)
+		}
+	}
+	return "0"
+}
+
+// CapturePhoto снимает один кадр с камеры и возвращает путь к JPEG. Вызывающий
+// обязан удалить файл после отправки.
 func CapturePhoto() (string, error) {
 	ff, err := ffmpegPath()
 	if err != nil {
@@ -39,17 +84,39 @@ func CapturePhoto() (string, error) {
 		return "", err
 	}
 	fname := filepath.Join(outputDir, fmt.Sprintf("photo-%d.jpg", time.Now().UnixNano()))
+	dev := cameraIndex(ff)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	// -f avfoundation -i "0" — видеоустройство 0 (камера); один кадр.
-	cmd := exec.CommandContext(ctx, ff,
-		"-y", "-f", "avfoundation", "-video_size", "1280x720", "-i", "0",
-		"-frames:v", "1", "-q:v", "5", fname)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("ffmpeg photo failed: %v: %s", err, tail(out))
+	shoot := func() ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		// -i <dev> — индекс камеры (определён cameraIndex). -update 1 обязателен для
+		// одиночного JPEG через image2-муксер, иначе ffmpeg ругается/ждёт паттерн
+		// имени. НЕ навязываем -video_size/-pixel_format: камера отдаёт нативный
+		// режим (uyvy422), жёсткий формат ломает захват при Continuity Camera.
+		cmd := exec.CommandContext(ctx, ff,
+			"-y", "-f", "avfoundation", "-framerate", "30", "-i", dev,
+			"-frames:v", "1", "-update", "1", "-q:v", "5", fname)
+		return cmd.CombinedOutput()
 	}
-	return fname, nil
+
+	// Камера на macOS эксклюзивна: если её держит Zoom/Teams/видеозвонок, ffmpeg
+	// возвращает "Input/output error". Пробуем несколько раз — камера могла
+	// освободиться. Микрофон, в отличие от камеры, шарится, поэтому /record такого
+	// не требует.
+	var out []byte
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(2 * time.Second)
+		}
+		if out, err = shoot(); err == nil {
+			return fname, nil
+		}
+	}
+
+	if strings.Contains(string(out), "Input/output error") {
+		return "", fmt.Errorf("camera busy — close apps using it (Zoom/Teams/browser call) and retry")
+	}
+	return "", fmt.Errorf("ffmpeg photo failed: %v: %s", err, tail(out))
 }
 
 // RecordAudio записывает seconds секунд звука с микрофона по умолчанию
