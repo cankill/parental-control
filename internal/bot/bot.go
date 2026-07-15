@@ -206,7 +206,29 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 			return c.Send("Statistics unavailable (shutting down)")
 		}
 		text, kb := renderStatistics(resp)
-		return c.Send(text, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, ReplyMarkup: kb})
+		if err := c.Send(text, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, ReplyMarkup: kb}); err != nil {
+			return err
+		}
+
+		// Если активен браузер — следом отдаём статистику сайтов за текущий час,
+		// пометив ● активный домен (аналогично активному приложению).
+		if url, _ := browser.FrontmostBrowserURL(); url != "" {
+			domain := browser.Domain(url)
+			responseChan := make(chan *types.AppInfoResponse, 1)
+			select {
+			case requests <- types.DomainRequest{ShiftHours: 0, ResponseChan: responseChan}:
+			case <-ctx.Done():
+				return nil
+			}
+			select {
+			case sitesResp := <-responseChan:
+				sitesResp.ActiveApp = domain // пометить активный сайт
+				sText, sKb := renderSites(sitesResp)
+				return c.Send(sText, &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, ReplyMarkup: sKb})
+			case <-ctx.Done():
+			}
+		}
+		return nil
 	}
 	b.Handle("/hourly", sendHourly)
 
@@ -257,14 +279,24 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	}
 	b.Handle("/daily", sendDaily)
 
-	// /stats — хаб: клавиатура выбора Hourly | Daily. Кнопки делают то же, что
-	// прямые /hourly и /daily. Callback от кнопки шлёт новое сообщение (не Edit),
-	// т.к. это переход к полноценному отчёту со своей навигацией.
+	// hubAction оформляет нажатие кнопки хаба как «пользователь напечатал команду»:
+	// заменяет хаб-сообщение (с клавиатурой) на текст самой команды (Edit без
+	// ReplyMarkup убирает клавиатуру), затем выполняет действие, которое присылает
+	// результат отдельным сообщением.
+	hubAction := func(label string, action func(tele.Context) error) func(tele.Context) error {
+		return func(c tele.Context) error {
+			_ = c.Edit(label)
+			_ = c.Respond()
+			return action(c)
+		}
+	}
+
+	// /stats — хаб: клавиатура выбора Hourly | Daily.
 	b.Handle("/stats", func(c tele.Context) error {
 		return c.Send("Statistics:", statsHub)
 	})
-	b.Handle(&btnHourly, func(c tele.Context) error { _ = c.Respond(); return sendHourly(c) })
-	b.Handle(&btnDaily, func(c tele.Context) error { _ = c.Respond(); return sendDaily(c) })
+	b.Handle(&btnHourly, hubAction("/hourly", sendHourly))
+	b.Handle(&btnDaily, hubAction("/daily", sendDaily))
 
 	dayNavHandler := func(c tele.Context) error {
 		shift, _ := strconv.Atoi(c.Data())
@@ -347,8 +379,8 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	b.Handle("/web", func(c tele.Context) error {
 		return c.Send("Web:", webHub)
 	})
-	b.Handle(&btnWebURL, func(c tele.Context) error { _ = c.Respond(); return sendURL(c) })
-	b.Handle(&btnWebSites, func(c tele.Context) error { _ = c.Respond(); return sendSites(c) })
+	b.Handle(&btnWebURL, hubAction("/url", sendURL))
+	b.Handle(&btnWebSites, hubAction("/sites", sendSites))
 
 	sitesNavHandler := func(c tele.Context) error {
 		shift, _ := strconv.Atoi(c.Data())
@@ -373,9 +405,14 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 		}
 		fname := filepath.Join(screenshotDir, fmt.Sprintf("capture-%d.jpg", time.Now().UnixNano()))
 		cmd := exec.Command("/usr/sbin/screencapture", "-t", "jpg", "-x", fname)
-		if err := cmd.Run(); err != nil {
-			fmt.Println("Error: ", err)
-			return c.Send(fmt.Sprintf("Error : %s", err))
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			fmt.Println("screencapture error:", err, string(out))
+			// "could not create image from display" — экран выключен/заблокирован.
+			if strings.Contains(string(out), "could not create image") {
+				return c.Send("Screen is off or locked — cannot capture right now.")
+			}
+			return c.Send(fmt.Sprintf("Screenshot error: %s", strings.TrimSpace(string(out))))
 		}
 		defer os.Remove(fname)
 		return c.Send(&tele.Photo{File: tele.FromDisk(fname)})
@@ -420,9 +457,9 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	b.Handle("/media", func(c tele.Context) error {
 		return c.Send("Media:", mediaHub)
 	})
-	b.Handle(&btnPhoto, func(c tele.Context) error { _ = c.Respond(); return sendPhoto(c) })
-	b.Handle(&btnScreen, func(c tele.Context) error { _ = c.Respond(); return sendScreen(c) })
-	b.Handle(&btnRecord, func(c tele.Context) error { _ = c.Respond(); return sendRecord(c) })
+	b.Handle(&btnPhoto, hubAction("/photo", sendPhoto))
+	b.Handle(&btnScreen, hubAction("/screen", sendScreen))
+	b.Handle(&btnRecord, hubAction("/record", sendRecord))
 
 	b.Handle("/youtube", func(c tele.Context) error {
 		return c.Reply("For how long?", selector)
@@ -464,14 +501,18 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 }
 
 func startYoutubeTimer(c tele.Context, timersCtx context.Context, duration time.Duration, blocker func(), unblocker func()) {
-	unblocker()
-	defer blocker()
+	unblocker() // открыть youtube на время таймера
 
 	fmt.Printf("Starting timer for %s\n", duration.String())
 	select {
 	case <-timersCtx.Done():
+		// Таймер отменён (новый таймер / явный Block или Unblock). НЕ блокируем сами —
+		// иначе defer перетёр бы явное действие пользователя. Итоговое состояние
+		// задаёт тот, кто отменил (Block блокирует, Unblock оставляет открытым).
 		fmt.Printf("Cancelling timer for %s\n", duration.String())
 	case <-time.After(duration):
+		// Время естественно вышло — блокируем обратно.
+		blocker()
 		c.Reply(fmt.Sprintf("%s timer finished...", duration.String()))
 	}
 }
@@ -532,7 +573,8 @@ func makeDayKeyboard(resp *types.AppInfoResponse) *tele.ReplyMarkup {
 // renderSites формирует таблицу статистики доменов за час и навигацию по часам.
 func renderSites(resp *types.AppInfoResponse) (string, *tele.ReplyMarkup) {
 	resp.AppInfos.SortByDurationDesc()
-	text := "```\n" + "  Sites for: " + resp.TimeStamp + "\n\n" + resp.AppInfos.FormatTable() + "\n```"
+	// ● помечает активный сайт (ActiveApp несёт активный домен, если задан).
+	text := "```\n" + "  Sites for: " + resp.TimeStamp + "\n\n" + resp.AppInfos.FormatTableMarked(resp.ActiveApp) + "\n```"
 	kb := &tele.ReplyMarkup{}
 	btns := []tele.Btn{}
 	if resp.HasOlder {
