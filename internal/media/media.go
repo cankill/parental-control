@@ -23,6 +23,28 @@ const outputDir = "/tmp/pc"
 // Разворачивается и подписывается при деплое (init.sls / codesign.sh).
 const signedFFmpeg = "/opt/parentcontrol/ffmpeg"
 
+// CaptureScreen takes a screenshot and returns its temporary path. The caller
+// must remove the file after sending it.
+func CaptureScreen() (string, error) {
+	if err := os.MkdirAll(outputDir, 0700); err != nil {
+		return "", fmt.Errorf("create media directory: %w", err)
+	}
+	fname := filepath.Join(outputDir, fmt.Sprintf("capture-%d.jpg", time.Now().UnixNano()))
+	out, err := exec.Command("/usr/sbin/screencapture", "-t", "jpg", "-x", fname).CombinedOutput()
+	if err == nil {
+		return fname, nil
+	}
+	_ = os.Remove(fname)
+	message := strings.TrimSpace(string(out))
+	if strings.Contains(message, "could not create image") {
+		return "", fmt.Errorf("screen is off or locked — cannot capture right now")
+	}
+	if message == "" {
+		message = err.Error()
+	}
+	return "", fmt.Errorf("screenshot failed: %s", message)
+}
+
 // ffmpegPath возвращает путь к ffmpeg: сначала нашу подписанную копию (для доступа
 // к камере/микрофону через TCC-грант нашей identity), затем системный ffmpeg.
 func ffmpegPath() (string, error) {

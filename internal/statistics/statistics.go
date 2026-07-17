@@ -50,6 +50,17 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 		select {
 		case <-ctx.Done():
 			fmt.Println("Stop received, finishing Statistics handling")
+			for {
+				select {
+				case command := <-commandsChannel:
+					if command.Type() == types.ActivityEvent {
+						storage.AddActivity(command.(types.ActivityBatch).Samples)
+					}
+				default:
+					goto drained
+				}
+			}
+		drained:
 			storage.IncreaseStatistics(activeApplication, activatedAt)
 			fmt.Println("Storage closed")
 			wg := ctx.Value(types.WgKey{}).(*sync.WaitGroup)
@@ -97,6 +108,16 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 			case types.AppInfoCommand:
 				query := command.(types.AppInfoQuery)
 				query.ResponseChan <- formatAppInfo(query.Name, storage.FindAppInfoByName(query.Name))
+
+			case types.ActivityEvent:
+				storage.AddActivity(command.(types.ActivityBatch).Samples)
+
+			case types.ActivityCommand:
+				request := command.(types.ActivityRequest)
+				resp := storage.GetActivity(request.ShiftHours)
+				resp.OlderShift, resp.HasOlder = storage.NearestActivityShift(request.ShiftHours, true)
+				resp.NewerShift, resp.HasNewer = storage.NearestActivityShift(request.ShiftHours, false)
+				request.ResponseChan <- resp
 
 			case types.Event:
 				event := command.(types.NewAppEvent)

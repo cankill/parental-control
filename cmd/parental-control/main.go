@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"parental-control/internal/activity"
 	"parental-control/internal/bot"
 	"parental-control/internal/lib/config"
 	"parental-control/internal/lib/types"
@@ -29,8 +30,11 @@ func main() {
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		ctx = context.WithValue(ctx, types.WgKey{}, &wg)
 		ctx = context.WithValue(ctx, types.EnvKey{}, env)
+		activityWG := sync.WaitGroup{}
+		activityCtx, stopActivity := context.WithCancel(ctx)
+		activityCtx = context.WithValue(activityCtx, types.WgKey{}, &activityWG)
 
-		statisticsCommandsChannel := make(chan types.AppCommand)
+		statisticsCommandsChannel := make(chan types.AppCommand, 32)
 		sigs := make(chan os.Signal, 1)
 
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -47,6 +51,9 @@ func main() {
 		wg.Add(1)
 		go statistics.TrackDomains(ctx, env.UrlPollInterval(), statisticsCommandsChannel)
 
+		activityWG.Add(1)
+		go activity.Track(activityCtx, statisticsCommandsChannel)
+
 		go func() {
 			<-sigs
 			fmt.Println()
@@ -56,6 +63,9 @@ func main() {
 			// statisticsCommandsChannel НЕ закрываем: observer ниже продолжает
 			// писать в него до отмены контекста, а закрытие со стороны отправителя
 			// привело бы к панике "send on closed channel".
+			// Flush activity while the statistics handler is still receiving.
+			stopActivity()
+			activityWG.Wait()
 			cancelFunc()
 
 			close(sigs)

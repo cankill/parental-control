@@ -8,6 +8,7 @@ require (
 	github.com/peterbourgon/diskv/v3 v3.0.1
 	github.com/progrium/darwinkit v0.5.0
 	github.com/txn2/txeh v1.8.1
+	golang.org/x/image v0.27.0
 	golang.org/x/sys v0.30.0
 	golang.org/x/text v0.27.0
 	gopkg.in/telebot.v4 v4.0.0-beta.10

@@ -21,6 +21,8 @@ const (
 	TruncatedToDay  = "2006-01-02"
 )
 
+const activityBucketPrefix = "activity/"
+
 type StatsStorage struct {
 	localStorage *diskvstorage.LocalStorage
 }
@@ -142,6 +144,54 @@ func (s *StatsStorage) NearestShift(fromShift int, older bool) (int, bool) {
 // NearestDomainShift — как NearestShift, но по часовым bucket'ам доменов (dom/).
 func (s *StatsStorage) NearestDomainShift(fromShift int, older bool) (int, bool) {
 	return s.nearestHourShift(domainBucketPrefix, fromShift, older)
+}
+
+// AddActivity stores one active second in its local five-minute bucket.
+func (s *StatsStorage) AddActivity(samples []types.ActivitySample) {
+	for _, sample := range samples {
+		minute := sample.At.Minute() / 5 * 5
+		hour := sample.At.Format(TruncatedToHour)
+		key := fmt.Sprintf("%02d", minute)
+		bucketName := activityBucketPrefix + hour
+		var bucket types.ActivityBucket
+		raw := s.localStorage.GetValue(bucketName, key)
+		if raw != "" && json.Unmarshal([]byte(raw), &bucket) != nil {
+			fmt.Printf("activity: corrupt %s/%s, replacing\n", bucketName, key)
+			bucket = types.ActivityBucket{}
+		}
+		switch sample.Kind {
+		case types.ActivityKeyboard:
+			bucket.KeyboardOnlySeconds++
+		case types.ActivityMouse:
+			bucket.MouseOnlySeconds++
+		case types.ActivityBoth:
+			bucket.BothSeconds++
+		default:
+			continue
+		}
+		data, _ := json.Marshal(bucket)
+		s.localStorage.SaveValue(bucketName, key, string(data))
+	}
+}
+
+func (s *StatsStorage) GetActivity(shiftHours int) *types.ActivityResponse {
+	hour := time.Now().Add(-time.Duration(shiftHours) * time.Hour).Format(TruncatedToHour)
+	resp := &types.ActivityResponse{TimeStamp: hour, ShiftHours: shiftHours}
+	values := s.localStorage.GetValues(activityBucketPrefix + hour)
+	for i := range resp.Buckets {
+		raw := values[fmt.Sprintf("%02d", i*5)]
+		if raw == "" {
+			continue
+		}
+		if err := json.Unmarshal([]byte(raw), &resp.Buckets[i]); err != nil {
+			fmt.Printf("activity: skipping corrupt bucket %s/%02d: %s\n", hour, i*5, err)
+		}
+	}
+	return resp
+}
+
+func (s *StatsStorage) NearestActivityShift(fromShift int, older bool) (int, bool) {
+	return s.nearestHourShift(activityBucketPrefix, fromShift, older)
 }
 
 // nearestHourShift обобщает поиск ближайшего непустого часа для bucket'ов с
