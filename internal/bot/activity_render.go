@@ -7,10 +7,13 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"math"
 	"parental-control/internal/lib/types"
 	"sort"
 	"strconv"
 
+	"github.com/tdewolff/canvas"
+	"github.com/tdewolff/canvas/renderers/rasterizer"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
@@ -19,21 +22,24 @@ import (
 	tele "gopkg.in/telebot.v4"
 )
 
-const activityChartWidth, activityChartHeight = 1000, 500
-const activityChartLeft, activityChartTop, activityChartBottom, activityChartRight = 70, 78, 405, 970
+const activityChartWidth, activityChartHeight = 900, 900
 const activityBucketSeconds = 300
+const activityCenterX, activityCenterY = 450, 444
+const activityInnerRadius, activityOuterRadius = 62.0, 294.0
+const activityClockRadius = 320.0
 
 var (
 	chartBackground   = color.RGBA{248, 250, 252, 255}
 	chartAxis         = color.RGBA{30, 41, 59, 255}
 	chartMuted        = color.RGBA{100, 116, 139, 255}
 	chartGrid         = color.RGBA{226, 232, 240, 255}
+	chartGridStrong   = color.RGBA{203, 213, 225, 255}
 	keyboardColor     = color.RGBA{59, 130, 246, 255}
 	mouseColor        = color.RGBA{249, 115, 22, 255}
 	totalColor        = color.RGBA{16, 185, 129, 255}
 	chartRegular      = mustParseChartFont(goregular.TTF)
 	chartBold         = mustParseChartFont(gobold.TTF)
-	activityBarWidths = [...]int{46, 30, 16}
+	activityBarWidths = [...]float64{30, 20, 10}
 )
 
 type activityChartSeries struct {
@@ -63,6 +69,47 @@ func drawText(img draw.Image, face font.Face, x, y int, text string, c color.Col
 func drawCenteredText(img draw.Image, face font.Face, center, y int, text string, c color.Color) {
 	width := font.MeasureString(face, text).Round()
 	drawText(img, face, center-width/2, y, text, c)
+}
+
+func activityPolarPoint(radius, angle float64) (float64, float64) {
+	return activityCenterX + radius*math.Cos(angle), activityCenterY + radius*math.Sin(angle)
+}
+
+func activityBucketAngle(bucket int) float64 {
+	return -math.Pi/2 + float64(bucket)*2*math.Pi/12
+}
+
+func activityBarLength(seconds int) float64 {
+	if seconds <= 0 {
+		return 0
+	}
+	if seconds > activityBucketSeconds {
+		seconds = activityBucketSeconds
+	}
+	length := float64(seconds) * (activityOuterRadius - activityInnerRadius) / activityBucketSeconds
+	if length < 1 {
+		return 1
+	}
+	return length
+}
+
+func drawCanvasLine(ctx *canvas.Context, x0, y0, x1, y1, width float64, c color.Color, rounded bool) {
+	ctx.SetFill(nil)
+	ctx.SetStrokeColor(c)
+	ctx.SetStrokeWidth(width)
+	if rounded {
+		ctx.SetStrokeCapper(canvas.RoundCap)
+	} else {
+		ctx.SetStrokeCapper(canvas.ButtCap)
+	}
+	ctx.DrawPath(x0, y0, canvas.Line(x1-x0, y1-y0))
+}
+
+func drawCanvasCircle(ctx *canvas.Context, radius, width float64, fill, stroke color.Color) {
+	ctx.SetFill(fill)
+	ctx.SetStroke(stroke)
+	ctx.SetStrokeWidth(width)
+	ctx.DrawPath(activityCenterX, activityCenterY, canvas.Circle(radius))
 }
 
 func drawRoundedTopBar(img draw.Image, rect image.Rectangle, radius int, c color.Color) {
@@ -104,17 +151,70 @@ func activitySeriesForBucket(bucket types.ActivityBucket) []activityChartSeries 
 	return series
 }
 
-func activityBarHeight(seconds, plotHeight int) int {
-	height := (seconds*plotHeight + activityBucketSeconds/2) / activityBucketSeconds
-	if seconds > 0 && height == 0 {
-		return 1
-	}
-	return height
-}
-
 func drawActivityLegendItem(img draw.Image, face font.Face, x, y int, label string, c color.RGBA) {
 	drawRoundedTopBar(img, image.Rect(x, y-11, x+14, y+3), 4, c)
 	drawText(img, face, x+22, y+1, label, chartAxis)
+}
+
+func drawActivityGrid(ctx *canvas.Context, img draw.Image, smallFace font.Face) {
+	for minute := 1; minute <= 5; minute++ {
+		radius := activityInnerRadius + float64(minute*60)*(activityOuterRadius-activityInnerRadius)/activityBucketSeconds
+		gridColor := color.Color(chartGrid)
+		if minute == 5 {
+			gridColor = chartGridStrong
+		}
+		drawCanvasCircle(ctx, radius, 1, nil, gridColor)
+
+		labelAngle := -math.Pi / 4
+		x, y := activityPolarPoint(radius, labelAngle)
+		drawText(img, smallFace, int(x)+5, int(y)+4, fmt.Sprintf("%dm", minute), chartMuted)
+	}
+
+	for bucket := 0; bucket < 12; bucket++ {
+		angle := activityBucketAngle(bucket)
+		x0, y0 := activityPolarPoint(activityInnerRadius, angle)
+		x1, y1 := activityPolarPoint(activityOuterRadius, angle)
+		drawCanvasLine(ctx, x0, y0, x1, y1, 1, chartGrid, false)
+	}
+	drawCanvasCircle(ctx, activityClockRadius, 2, nil, chartAxis)
+}
+
+func drawActivityClock(ctx *canvas.Context, img draw.Image, face font.Face) {
+	for bucket := 0; bucket < 12; bucket++ {
+		angle := activityBucketAngle(bucket)
+		major := bucket%3 == 0
+		tickLength := 8.0
+		tickWidth := 1.5
+		if major {
+			tickLength = 15
+			tickWidth = 2.5
+		}
+		x0, y0 := activityPolarPoint(activityClockRadius-tickLength, angle)
+		x1, y1 := activityPolarPoint(activityClockRadius, angle)
+		drawCanvasLine(ctx, x0, y0, x1, y1, tickWidth, chartAxis, false)
+
+		if major {
+			x, y := activityPolarPoint(activityClockRadius+25, angle)
+			label := fmt.Sprintf("%02d", bucket*5)
+			width := font.MeasureString(face, label).Round()
+			drawText(img, face, int(x)-width/2, int(y)+5, label, chartAxis)
+		}
+	}
+}
+
+func drawActivityBars(ctx *canvas.Context, buckets [12]types.ActivityBucket) {
+	for bucketIndex, bucket := range buckets {
+		angle := activityBucketAngle(bucketIndex)
+		x0, y0 := activityPolarPoint(activityInnerRadius, angle)
+		for rank, series := range activitySeriesForBucket(bucket) {
+			length := activityBarLength(series.seconds)
+			if length == 0 {
+				continue
+			}
+			x1, y1 := activityPolarPoint(activityInnerRadius+length, angle)
+			drawCanvasLine(ctx, x0, y0, x1, y1, activityBarWidths[rank], series.color, true)
+		}
+	}
 }
 
 func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
@@ -136,45 +236,33 @@ func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 
 	img := image.NewRGBA(image.Rect(0, 0, activityChartWidth, activityChartHeight))
 	draw.Draw(img, img.Bounds(), image.NewUniform(chartBackground), image.Point{}, draw.Src)
-	plotHeight := activityChartBottom - activityChartTop
-	for seconds := 0; seconds <= activityBucketSeconds; seconds += 60 {
-		y := activityChartBottom - seconds*plotHeight/activityBucketSeconds
-		draw.Draw(img, image.Rect(activityChartLeft, y, activityChartRight, y+1), image.NewUniform(chartGrid), image.Point{}, draw.Src)
-		label := "0"
-		if seconds != 0 {
-			label = fmt.Sprintf("%dm", seconds/60)
-		}
-		drawText(img, smallFace, 38, y+4, label, chartMuted)
-	}
-	drawText(img, titleFace, activityChartLeft, 33, "Input activity", chartAxis)
-	drawText(img, smallFace, activityChartLeft, 55, resp.TimeStamp+" · active seconds per 5-minute interval", chartMuted)
+	ras := rasterizer.FromImage(img, canvas.DPMM(1), canvas.DefaultColorSpace)
+	ctx := canvas.NewContext(ras)
+	ctx.SetCoordSystem(canvas.CartesianIV)
 
 	total := types.ActivityBucket{}
-	for i, bucket := range resp.Buckets {
-		center := activityChartLeft + (2*i+1)*(activityChartRight-activityChartLeft)/24
-		for rank, series := range activitySeriesForBucket(bucket) {
-			height := activityBarHeight(series.seconds, plotHeight)
-			if height == 0 {
-				continue
-			}
-			width := activityBarWidths[rank]
-			x0 := center - width/2
-			drawRoundedTopBar(img, image.Rect(x0, activityChartBottom-height, x0+width, activityChartBottom), 5, series.color)
-		}
-		if active := bucket.ActiveSeconds(); active > 0 {
-			labelY := activityChartBottom - activityBarHeight(active, plotHeight) - 8
-			drawCenteredText(img, smallFace, center, labelY, fmt.Sprintf("%ds", active), chartMuted)
-		}
+	for _, bucket := range resp.Buckets {
 		total.KeyboardOnlySeconds += bucket.KeyboardOnlySeconds
 		total.MouseOnlySeconds += bucket.MouseOnlySeconds
 		total.BothSeconds += bucket.BothSeconds
-		drawCenteredText(img, smallFace, center, activityChartBottom+23, fmt.Sprintf("%02d", i*5), chartMuted)
 	}
-	drawActivityLegendItem(img, regularFace, activityChartLeft, 461, "Total activity", totalColor)
-	drawActivityLegendItem(img, regularFace, 255, 461, "Keyboard", keyboardColor)
-	drawActivityLegendItem(img, regularFace, 395, 461, "Mouse", mouseColor)
+
+	drawActivityGrid(ctx, img, smallFace)
+	drawActivityBars(ctx, resp.Buckets)
+	drawActivityClock(ctx, img, regularFace)
+	drawCanvasCircle(ctx, activityInnerRadius-12, 2, chartBackground, chartAxis)
+	ras.Close()
+
+	drawText(img, titleFace, 48, 42, "Input activity", chartAxis)
+	drawText(img, smallFace, 48, 65, resp.TimeStamp+" · radial 5-minute intervals", chartMuted)
+	drawCenteredText(img, titleFace, activityCenterX, activityCenterY-2, fmt.Sprintf("%ds", total.ActiveSeconds()), chartAxis)
+	drawCenteredText(img, smallFace, activityCenterX, activityCenterY+20, "active", chartMuted)
+
+	drawActivityLegendItem(img, regularFace, 48, 852, "Total activity", totalColor)
+	drawActivityLegendItem(img, regularFace, 234, 852, "Keyboard", keyboardColor)
+	drawActivityLegendItem(img, regularFace, 374, 852, "Mouse", mouseColor)
 	summary := fmt.Sprintf("%d active sec · %.1f%% of hour", total.ActiveSeconds(), float64(total.ActiveSeconds())/36)
-	drawText(img, regularFace, activityChartRight-font.MeasureString(regularFace, summary).Round(), 462, summary, chartAxis)
+	drawText(img, regularFace, activityChartWidth-48-font.MeasureString(regularFace, summary).Round(), 853, summary, chartAxis)
 	var out bytes.Buffer
 	if err := png.Encode(&out, img); err != nil {
 		return nil, err
