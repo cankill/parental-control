@@ -47,9 +47,9 @@ func (c *statisticsClient) appInfo(name string) (string, error) {
 	return receive(c.ctx, response)
 }
 
-func (c *statisticsClient) activity(shift int) (*types.ActivityResponse, error) {
+func (c *statisticsClient) activity(period types.ActivityPeriod, shift int) (*types.ActivityResponse, error) {
 	response := make(chan *types.ActivityResponse, 1)
-	if err := c.send(types.ActivityRequest{ShiftHours: shift, ResponseChan: response}); err != nil {
+	if err := c.send(types.ActivityRequest{Period: period, Shift: shift, ResponseChan: response}); err != nil {
 		return nil, err
 	}
 	return receive(c.ctx, response)

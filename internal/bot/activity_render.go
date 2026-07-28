@@ -10,7 +10,6 @@ import (
 	"math"
 	"parental-control/internal/lib/types"
 	"sort"
-	"strconv"
 
 	"github.com/tdewolff/canvas"
 	"github.com/tdewolff/canvas/renderers/rasterizer"
@@ -23,23 +22,21 @@ import (
 )
 
 const activityChartWidth, activityChartHeight = 900, 900
-const activityBucketSeconds = 300
 const activityCenterX, activityCenterY = 450, 444
 const activityInnerRadius, activityOuterRadius = 62.0, 294.0
 const activityClockRadius = 320.0
 
 var (
-	chartBackground   = color.RGBA{248, 250, 252, 255}
-	chartAxis         = color.RGBA{30, 41, 59, 255}
-	chartMuted        = color.RGBA{100, 116, 139, 255}
-	chartGrid         = color.RGBA{226, 232, 240, 255}
-	chartGridStrong   = color.RGBA{203, 213, 225, 255}
-	keyboardColor     = color.RGBA{59, 130, 246, 255}
-	mouseColor        = color.RGBA{249, 115, 22, 255}
-	totalColor        = color.RGBA{16, 185, 129, 255}
-	chartRegular      = mustParseChartFont(goregular.TTF)
-	chartBold         = mustParseChartFont(gobold.TTF)
-	activityBarWidths = [...]float64{30, 20, 10}
+	chartBackground = color.RGBA{248, 250, 252, 255}
+	chartAxis       = color.RGBA{30, 41, 59, 255}
+	chartMuted      = color.RGBA{100, 116, 139, 255}
+	chartGrid       = color.RGBA{226, 232, 240, 255}
+	chartGridStrong = color.RGBA{203, 213, 225, 255}
+	keyboardColor   = color.RGBA{59, 130, 246, 255}
+	mouseColor      = color.RGBA{249, 115, 22, 255}
+	totalColor      = color.RGBA{16, 185, 129, 255}
+	chartRegular    = mustParseChartFont(goregular.TTF)
+	chartBold       = mustParseChartFont(gobold.TTF)
 )
 
 type activityChartSeries struct {
@@ -47,6 +44,62 @@ type activityChartSeries struct {
 	seconds  int
 	color    color.RGBA
 	priority int
+}
+
+type activityChartConfig struct {
+	period        types.ActivityPeriod
+	bucketSeconds int
+	periodSeconds int
+	gridStep      int
+	intervalLabel string
+	periodLabel   string
+}
+
+func activityConfig(resp *types.ActivityResponse) activityChartConfig {
+	switch resp.Period {
+	case types.ActivityDaily:
+		return activityChartConfig{
+			period: types.ActivityDaily, bucketSeconds: 60 * 60,
+			periodSeconds: 24 * 60 * 60, gridStep: 15 * 60,
+			intervalLabel: "hourly intervals", periodLabel: "day",
+		}
+	case types.ActivityWeekly:
+		return activityChartConfig{
+			period: types.ActivityWeekly, bucketSeconds: 24 * 60 * 60,
+			periodSeconds: 7 * 24 * 60 * 60, gridStep: 6 * 60 * 60,
+			intervalLabel: "daily intervals", periodLabel: "week",
+		}
+	default:
+		return activityChartConfig{
+			period: types.ActivityHourly, bucketSeconds: 5 * 60,
+			periodSeconds: 60 * 60, gridStep: 60,
+			intervalLabel: "5-minute intervals", periodLabel: "hour",
+		}
+	}
+}
+
+func activityPeriodName(period types.ActivityPeriod) string {
+	switch period {
+	case types.ActivityDaily:
+		return "Daily"
+	case types.ActivityWeekly:
+		return "Weekly"
+	default:
+		return "Hourly"
+	}
+}
+
+func activityBuckets(resp *types.ActivityResponse) []types.ActivityBucket {
+	if len(resp.Buckets) != 0 {
+		return resp.Buckets
+	}
+	count := 12
+	if resp.Period == types.ActivityDaily {
+		count = 24
+	} else if resp.Period == types.ActivityWeekly {
+		count = 7
+	}
+	return make([]types.ActivityBucket, count)
 }
 
 func mustParseChartFont(data []byte) *opentype.Font {
@@ -75,18 +128,18 @@ func activityPolarPoint(radius, angle float64) (float64, float64) {
 	return activityCenterX + radius*math.Cos(angle), activityCenterY + radius*math.Sin(angle)
 }
 
-func activityBucketAngle(bucket int) float64 {
-	return -math.Pi/2 + float64(bucket)*2*math.Pi/12
+func activityBucketAngle(bucket, bucketCount int) float64 {
+	return -math.Pi/2 + float64(bucket)*2*math.Pi/float64(bucketCount)
 }
 
-func activityBarLength(seconds int) float64 {
+func activityBarLength(seconds, bucketSeconds int) float64 {
 	if seconds <= 0 {
 		return 0
 	}
-	if seconds > activityBucketSeconds {
-		seconds = activityBucketSeconds
+	if seconds > bucketSeconds {
+		seconds = bucketSeconds
 	}
-	length := float64(seconds) * (activityOuterRadius - activityInnerRadius) / activityBucketSeconds
+	length := float64(seconds) * (activityOuterRadius - activityInnerRadius) / float64(bucketSeconds)
 	if length < 1 {
 		return 1
 	}
@@ -156,22 +209,22 @@ func drawActivityLegendItem(img draw.Image, face font.Face, x, y int, label stri
 	drawText(img, face, x+22, y+1, label, chartAxis)
 }
 
-func drawActivityGrid(ctx *canvas.Context, img draw.Image, smallFace font.Face) {
-	for minute := 1; minute <= 5; minute++ {
-		radius := activityInnerRadius + float64(minute*60)*(activityOuterRadius-activityInnerRadius)/activityBucketSeconds
+func drawActivityGrid(ctx *canvas.Context, img draw.Image, smallFace font.Face, config activityChartConfig, bucketCount int) {
+	for seconds := config.gridStep; seconds <= config.bucketSeconds; seconds += config.gridStep {
+		radius := activityInnerRadius + float64(seconds)*(activityOuterRadius-activityInnerRadius)/float64(config.bucketSeconds)
 		gridColor := color.Color(chartGrid)
-		if minute == 5 {
+		if seconds == config.bucketSeconds {
 			gridColor = chartGridStrong
 		}
 		drawCanvasCircle(ctx, radius, 1, nil, gridColor)
 
 		labelAngle := -math.Pi / 4
 		x, y := activityPolarPoint(radius, labelAngle)
-		drawText(img, smallFace, int(x)+5, int(y)+4, fmt.Sprintf("%dm", minute), chartMuted)
+		drawText(img, smallFace, int(x)+5, int(y)+4, formatActivityScale(seconds), chartMuted)
 	}
 
-	for bucket := 0; bucket < 12; bucket++ {
-		angle := activityBucketAngle(bucket)
+	for bucket := 0; bucket < bucketCount; bucket++ {
+		angle := activityBucketAngle(bucket, bucketCount)
 		x0, y0 := activityPolarPoint(activityInnerRadius, angle)
 		x1, y1 := activityPolarPoint(activityOuterRadius, angle)
 		drawCanvasLine(ctx, x0, y0, x1, y1, 1, chartGrid, false)
@@ -179,10 +232,39 @@ func drawActivityGrid(ctx *canvas.Context, img draw.Image, smallFace font.Face) 
 	drawCanvasCircle(ctx, activityClockRadius, 2, nil, chartAxis)
 }
 
-func drawActivityClock(ctx *canvas.Context, img draw.Image, face font.Face) {
-	for bucket := 0; bucket < 12; bucket++ {
-		angle := activityBucketAngle(bucket)
-		major := bucket%3 == 0
+func formatActivityScale(seconds int) string {
+	if seconds >= 60*60 && seconds%(60*60) == 0 {
+		return fmt.Sprintf("%dh", seconds/(60*60))
+	}
+	if seconds >= 60 {
+		return fmt.Sprintf("%dm", seconds/60)
+	}
+	return fmt.Sprintf("%ds", seconds)
+}
+
+func activityClockLabel(period types.ActivityPeriod, bucket int) (string, bool) {
+	switch period {
+	case types.ActivityDaily:
+		if bucket%6 == 0 {
+			return fmt.Sprintf("%02d", bucket), true
+		}
+	case types.ActivityWeekly:
+		labels := [...]string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+		if bucket >= 0 && bucket < len(labels) {
+			return labels[bucket], true
+		}
+	default:
+		if bucket%3 == 0 {
+			return fmt.Sprintf("%02d", bucket*5), true
+		}
+	}
+	return "", false
+}
+
+func drawActivityClock(ctx *canvas.Context, img draw.Image, face font.Face, period types.ActivityPeriod, bucketCount int) {
+	for bucket := 0; bucket < bucketCount; bucket++ {
+		angle := activityBucketAngle(bucket, bucketCount)
+		label, major := activityClockLabel(period, bucket)
 		tickLength := 8.0
 		tickWidth := 1.5
 		if major {
@@ -195,24 +277,34 @@ func drawActivityClock(ctx *canvas.Context, img draw.Image, face font.Face) {
 
 		if major {
 			x, y := activityPolarPoint(activityClockRadius+25, angle)
-			label := fmt.Sprintf("%02d", bucket*5)
 			width := font.MeasureString(face, label).Round()
 			drawText(img, face, int(x)-width/2, int(y)+5, label, chartAxis)
 		}
 	}
 }
 
-func drawActivityBars(ctx *canvas.Context, buckets [12]types.ActivityBucket) {
+func activityBarWidths(bucketCount int) [3]float64 {
+	if bucketCount >= 24 {
+		return [3]float64{16, 10, 5}
+	}
+	if bucketCount <= 7 {
+		return [3]float64{38, 25, 12}
+	}
+	return [3]float64{30, 20, 10}
+}
+
+func drawActivityBars(ctx *canvas.Context, buckets []types.ActivityBucket, config activityChartConfig) {
+	widths := activityBarWidths(len(buckets))
 	for bucketIndex, bucket := range buckets {
-		angle := activityBucketAngle(bucketIndex)
+		angle := activityBucketAngle(bucketIndex, len(buckets))
 		x0, y0 := activityPolarPoint(activityInnerRadius, angle)
 		for rank, series := range activitySeriesForBucket(bucket) {
-			length := activityBarLength(series.seconds)
+			length := activityBarLength(series.seconds, config.bucketSeconds)
 			if length == 0 {
 				continue
 			}
 			x1, y1 := activityPolarPoint(activityInnerRadius+length, angle)
-			drawCanvasLine(ctx, x0, y0, x1, y1, activityBarWidths[rank], series.color, true)
+			drawCanvasLine(ctx, x0, y0, x1, y1, widths[rank], series.color, true)
 		}
 	}
 }
@@ -239,29 +331,35 @@ func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 	ras := rasterizer.FromImage(img, canvas.DPMM(1), canvas.DefaultColorSpace)
 	ctx := canvas.NewContext(ras)
 	ctx.SetCoordSystem(canvas.CartesianIV)
+	config := activityConfig(resp)
+	buckets := activityBuckets(resp)
 
 	total := types.ActivityBucket{}
-	for _, bucket := range resp.Buckets {
+	for _, bucket := range buckets {
 		total.KeyboardOnlySeconds += bucket.KeyboardOnlySeconds
 		total.MouseOnlySeconds += bucket.MouseOnlySeconds
 		total.BothSeconds += bucket.BothSeconds
 	}
 
-	drawActivityGrid(ctx, img, smallFace)
-	drawActivityBars(ctx, resp.Buckets)
-	drawActivityClock(ctx, img, regularFace)
+	drawActivityGrid(ctx, img, smallFace, config, len(buckets))
+	drawActivityBars(ctx, buckets, config)
+	drawActivityClock(ctx, img, regularFace, config.period, len(buckets))
 	drawCanvasCircle(ctx, activityInnerRadius-12, 2, chartBackground, chartAxis)
 	ras.Close()
 
-	drawText(img, titleFace, 48, 42, "Input activity", chartAxis)
-	drawText(img, smallFace, 48, 65, resp.TimeStamp+" · radial 5-minute intervals", chartMuted)
-	drawCenteredText(img, titleFace, activityCenterX, activityCenterY-2, fmt.Sprintf("%ds", total.ActiveSeconds()), chartAxis)
+	drawText(img, titleFace, 48, 42, activityPeriodName(config.period)+" input activity", chartAxis)
+	drawText(img, smallFace, 48, 65, resp.TimeStamp+" · radial "+config.intervalLabel, chartMuted)
+	drawCenteredText(img, titleFace, activityCenterX, activityCenterY-2, formatActivityDuration(total.ActiveSeconds()), chartAxis)
 	drawCenteredText(img, smallFace, activityCenterX, activityCenterY+20, "active", chartMuted)
 
 	drawActivityLegendItem(img, regularFace, 48, 852, "Total activity", totalColor)
 	drawActivityLegendItem(img, regularFace, 234, 852, "Keyboard", keyboardColor)
 	drawActivityLegendItem(img, regularFace, 374, 852, "Mouse", mouseColor)
-	summary := fmt.Sprintf("%d active sec · %.1f%% of hour", total.ActiveSeconds(), float64(total.ActiveSeconds())/36)
+	summary := fmt.Sprintf("%s active · %.1f%% of %s",
+		formatActivityDuration(total.ActiveSeconds()),
+		float64(total.ActiveSeconds())*100/float64(config.periodSeconds),
+		config.periodLabel,
+	)
 	drawText(img, regularFace, activityChartWidth-48-font.MeasureString(regularFace, summary).Round(), 853, summary, chartAxis)
 	var out bytes.Buffer
 	if err := png.Encode(&out, img); err != nil {
@@ -270,25 +368,50 @@ func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+func formatActivityDuration(seconds int) string {
+	if seconds < 60*60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	if seconds < 24*60*60 {
+		hours := seconds / (60 * 60)
+		minutes := seconds / 60 % 60
+		if minutes == 0 {
+			return fmt.Sprintf("%dh", hours)
+		}
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	days := seconds / (24 * 60 * 60)
+	hours := seconds / (60 * 60) % 24
+	if hours == 0 {
+		return fmt.Sprintf("%dd", days)
+	}
+	return fmt.Sprintf("%dd %dh", days, hours)
+}
+
 func activityCaption(resp *types.ActivityResponse) string {
 	active := 0
-	for _, b := range resp.Buckets {
+	for _, b := range activityBuckets(resp) {
 		active += b.ActiveSeconds()
 	}
-	return fmt.Sprintf("Activity for %s · %d active seconds", resp.TimeStamp, active)
+	return fmt.Sprintf("%s activity for %s · %s active",
+		activityPeriodName(resp.Period), resp.TimeStamp, formatActivityDuration(active))
 }
 
 func activityKeyboard(resp *types.ActivityResponse) *tele.ReplyMarkup {
 	kb := &tele.ReplyMarkup{}
 	buttons := []tele.Btn{}
 	if resp.HasOlder {
-		buttons = append(buttons, kb.Data("‹ Earlier", "activity-prev", strconv.Itoa(resp.OlderShift)))
+		buttons = append(buttons, kb.Data("‹ Earlier", "activity-prev", activityNavigationData(resp.Period, resp.OlderShift)))
 	}
 	if resp.HasNewer {
-		buttons = append(buttons, kb.Data("Later ›", "activity-next", strconv.Itoa(resp.NewerShift)))
+		buttons = append(buttons, kb.Data("Later ›", "activity-next", activityNavigationData(resp.Period, resp.NewerShift)))
 	}
 	if len(buttons) != 0 {
 		kb.Inline(kb.Row(buttons...))
 	}
 	return kb
+}
+
+func activityNavigationData(period types.ActivityPeriod, shift int) string {
+	return fmt.Sprintf("%d:%d", period, shift)
 }

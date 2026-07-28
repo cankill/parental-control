@@ -174,24 +174,115 @@ func (s *StatsStorage) AddActivity(samples []types.ActivitySample) {
 	}
 }
 
-func (s *StatsStorage) GetActivity(shiftHours int) *types.ActivityResponse {
-	hour := time.Now().Add(-time.Duration(shiftHours) * time.Hour).Format(TruncatedToHour)
-	resp := &types.ActivityResponse{TimeStamp: hour, ShiftHours: shiftHours}
-	values := s.localStorage.GetValues(activityBucketPrefix + hour)
-	for i := range resp.Buckets {
-		raw := values[fmt.Sprintf("%02d", i*5)]
-		if raw == "" {
-			continue
+func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *types.ActivityResponse {
+	now := time.Now()
+	resp := &types.ActivityResponse{Period: period, Shift: shift}
+	switch period {
+	case types.ActivityDaily:
+		day := now.AddDate(0, 0, -shift)
+		resp.TimeStamp = day.Format(TruncatedToDay)
+		resp.BucketSeconds = 60 * 60
+		resp.Buckets = make([]types.ActivityBucket, 24)
+		for hour := range resp.Buckets {
+			hourName := fmt.Sprintf("%sT%02d", resp.TimeStamp, hour)
+			resp.Buckets[hour] = sumActivityBuckets(s.readActivityHour(hourName))
 		}
-		if err := json.Unmarshal([]byte(raw), &resp.Buckets[i]); err != nil {
-			fmt.Printf("activity: skipping corrupt bucket %s/%02d: %s\n", hour, i*5, err)
+	case types.ActivityWeekly:
+		weekStart := activityWeekStart(now).AddDate(0, 0, -7*shift)
+		weekEnd := weekStart.AddDate(0, 0, 6)
+		resp.TimeStamp = weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay)
+		resp.BucketSeconds = 24 * 60 * 60
+		resp.Buckets = make([]types.ActivityBucket, 7)
+		for day := range resp.Buckets {
+			date := weekStart.AddDate(0, 0, day).Format(TruncatedToDay)
+			for hour := 0; hour < 24; hour++ {
+				hourName := fmt.Sprintf("%sT%02d", date, hour)
+				addActivityBucket(&resp.Buckets[day], sumActivityBuckets(s.readActivityHour(hourName)))
+			}
 		}
+	default:
+		resp.Period = types.ActivityHourly
+		hour := now.Add(-time.Duration(shift) * time.Hour).Format(TruncatedToHour)
+		resp.TimeStamp = hour
+		resp.BucketSeconds = 5 * 60
+		resp.Buckets = s.readActivityHour(hour)
 	}
 	return resp
 }
 
-func (s *StatsStorage) NearestActivityShift(fromShift int, older bool) (int, bool) {
-	return s.nearestHourShift(activityBucketPrefix, fromShift, older)
+func (s *StatsStorage) readActivityHour(hour string) []types.ActivityBucket {
+	buckets := make([]types.ActivityBucket, 12)
+	values := s.localStorage.GetValues(activityBucketPrefix + hour)
+	for i := range buckets {
+		raw := values[fmt.Sprintf("%02d", i*5)]
+		if raw == "" {
+			continue
+		}
+		if err := json.Unmarshal([]byte(raw), &buckets[i]); err != nil {
+			fmt.Printf("activity: skipping corrupt bucket %s/%02d: %s\n", hour, i*5, err)
+		}
+	}
+	return buckets
+}
+
+func sumActivityBuckets(buckets []types.ActivityBucket) types.ActivityBucket {
+	var total types.ActivityBucket
+	for _, bucket := range buckets {
+		addActivityBucket(&total, bucket)
+	}
+	return total
+}
+
+func addActivityBucket(total *types.ActivityBucket, bucket types.ActivityBucket) {
+	total.KeyboardOnlySeconds += bucket.KeyboardOnlySeconds
+	total.MouseOnlySeconds += bucket.MouseOnlySeconds
+	total.BothSeconds += bucket.BothSeconds
+}
+
+func activityWeekStart(t time.Time) time.Time {
+	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	daysSinceMonday := (int(day.Weekday()) + 6) % 7
+	return day.AddDate(0, 0, -daysSinceMonday)
+}
+
+func activityDayIndex(t time.Time) int64 {
+	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	return day.Unix() / int64((24*time.Hour)/time.Second)
+}
+
+func (s *StatsStorage) NearestActivityShift(period types.ActivityPeriod, fromShift int, older bool) (int, bool) {
+	now := time.Now()
+	currentHour := now.Truncate(time.Hour)
+	currentWeek := activityWeekStart(now)
+	best := -1
+	for _, bucket := range s.localStorage.ListBuckets() {
+		if !strings.HasPrefix(bucket, activityBucketPrefix) {
+			continue
+		}
+		t, err := time.ParseInLocation(TruncatedToHour, strings.TrimPrefix(bucket, activityBucketPrefix), time.Local)
+		if err != nil {
+			continue
+		}
+		var shift int
+		switch period {
+		case types.ActivityDaily:
+			shift = int(activityDayIndex(now) - activityDayIndex(t))
+		case types.ActivityWeekly:
+			shift = int((activityDayIndex(currentWeek) - activityDayIndex(activityWeekStart(t))) / 7)
+		default:
+			shift = int(currentHour.Sub(t.Truncate(time.Hour)) / time.Hour)
+		}
+		if shift < 0 {
+			continue
+		}
+		if older && shift > fromShift && (best == -1 || shift < best) {
+			best = shift
+		}
+		if !older && shift < fromShift && shift > best {
+			best = shift
+		}
+	}
+	return best, best != -1
 }
 
 // nearestHourShift обобщает поиск ближайшего непустого часа для bucket'ов с

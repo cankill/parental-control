@@ -43,8 +43,17 @@ type ActivityBatch struct{ Samples []ActivitySample }
 
 func (b ActivityBatch) Type() AppCommandType { return ActivityEvent }
 
+type ActivityPeriod uint8
+
+const (
+	ActivityHourly ActivityPeriod = iota
+	ActivityDaily
+	ActivityWeekly
+)
+
 type ActivityRequest struct {
-	ShiftHours   int
+	Period       ActivityPeriod
+	Shift        int
 	ResponseChan chan<- *ActivityResponse
 }
 
@@ -61,13 +70,15 @@ func (b ActivityBucket) ActiveSeconds() int {
 }
 
 type ActivityResponse struct {
-	TimeStamp  string
-	ShiftHours int
-	Buckets    [12]ActivityBucket
-	OlderShift int
-	NewerShift int
-	HasOlder   bool
-	HasNewer   bool
+	Period        ActivityPeriod
+	TimeStamp     string
+	Shift         int
+	BucketSeconds int
+	Buckets       []ActivityBucket
+	OlderShift    int
+	NewerShift    int
+	HasOlder      bool
+	HasNewer      bool
 }
 
 func (sc RequestCommand) Type() AppCommandType {

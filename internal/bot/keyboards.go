@@ -14,6 +14,11 @@ type keyboards struct {
 	daily    tele.Btn
 	activity tele.Btn
 
+	activityMenu   *tele.ReplyMarkup
+	activityHourly tele.Btn
+	activityDaily  tele.Btn
+	activityWeekly tele.Btn
+
 	media  *tele.ReplyMarkup
 	photo  tele.Btn
 	screen tele.Btn
@@ -35,10 +40,11 @@ type keyboards struct {
 
 func newKeyboards() *keyboards {
 	k := &keyboards{
-		youtube: &tele.ReplyMarkup{},
-		stats:   &tele.ReplyMarkup{},
-		media:   &tele.ReplyMarkup{},
-		web:     &tele.ReplyMarkup{},
+		youtube:      &tele.ReplyMarkup{},
+		stats:        &tele.ReplyMarkup{},
+		activityMenu: &tele.ReplyMarkup{},
+		media:        &tele.ReplyMarkup{},
+		web:          &tele.ReplyMarkup{},
 	}
 	k.minutes30 = k.youtube.Data("30 Minutes", "30-minutes")
 	k.hour1 = k.youtube.Data("1 Hour", "1-hour")
@@ -50,6 +56,11 @@ func newKeyboards() *keyboards {
 	k.daily = k.stats.Data("Daily", "hub-daily")
 	k.activity = k.stats.Data("Activity", "hub-activity")
 	k.stats.Inline(k.stats.Row(k.hourly, k.daily, k.activity))
+
+	k.activityHourly = k.activityMenu.Data("Hourly", "activity-hourly")
+	k.activityDaily = k.activityMenu.Data("Daily", "activity-daily")
+	k.activityWeekly = k.activityMenu.Data("Weekly", "activity-weekly")
+	k.activityMenu.Inline(k.activityMenu.Row(k.activityHourly, k.activityDaily, k.activityWeekly))
 
 	k.photo = k.media.Data("Photo", "hub-photo")
 	k.screen = k.media.Data("Screen", "hub-screen")

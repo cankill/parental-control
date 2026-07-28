@@ -114,9 +114,9 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 
 			case types.ActivityCommand:
 				request := command.(types.ActivityRequest)
-				resp := storage.GetActivity(request.ShiftHours)
-				resp.OlderShift, resp.HasOlder = storage.NearestActivityShift(request.ShiftHours, true)
-				resp.NewerShift, resp.HasNewer = storage.NearestActivityShift(request.ShiftHours, false)
+				resp := storage.GetActivity(request.Period, request.Shift)
+				resp.OlderShift, resp.HasOlder = storage.NearestActivityShift(request.Period, request.Shift, true)
+				resp.NewerShift, resp.HasNewer = storage.NearestActivityShift(request.Period, request.Shift, false)
 				request.ResponseChan <- resp
 
 			case types.Event:

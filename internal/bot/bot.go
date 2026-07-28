@@ -74,7 +74,7 @@ func botCommands() []tele.Command {
 		{Text: "stats", Description: "App usage: Hourly | Daily"},
 		{Text: "hourly", Description: "App usage this hour"},
 		{Text: "daily", Description: "App usage today"},
-		{Text: "activity", Description: "Keyboard and mouse activity chart"},
+		{Text: "activity", Description: "Activity: Hourly | Daily | Weekly"},
 		{Text: "info", Description: "App info by name: /info <name>"},
 		{Text: "web", Description: "Browser: URL | Sites"},
 		{Text: "url", Description: "Current browser URL"},
