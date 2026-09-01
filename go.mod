@@ -3,6 +3,7 @@ module parental-control
 go 1.24.7
 
 require (
+	github.com/go-telegram/bot v1.24.0
 	github.com/ilyakaznacheev/cleanenv v1.5.0
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/peterbourgon/diskv/v3 v3.0.1
@@ -12,7 +13,6 @@ require (
 	golang.org/x/image v0.27.0
 	golang.org/x/sys v0.33.0
 	golang.org/x/text v0.27.0
-	gopkg.in/telebot.v4 v4.0.0-beta.10
 )
 
 require (

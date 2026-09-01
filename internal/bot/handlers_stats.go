@@ -5,31 +5,31 @@ import (
 	"strconv"
 	"strings"
 
-	tele "gopkg.in/telebot.v4"
+	"github.com/go-telegram/bot/models"
 )
 
 func (h *handlerRegistry) registerStatsHandlers() {
-	h.bot.Handle("/hourly", h.sendHourly)
-	h.bot.Handle("/daily", h.sendDaily)
-	h.bot.Handle("/info", h.sendAppInfo)
-	h.bot.Handle("/stats", func(c tele.Context) error {
-		return c.Send("Statistics:", h.keyboards.stats)
+	h.command("hourly", h.sendHourly)
+	h.command("daily", h.sendDaily)
+	h.command("info", h.sendAppInfo)
+	h.command("stats", func(c *updateContext) error {
+		return c.SendText("Statistics:", "", h.keyboards.stats)
 	})
-	h.bot.Handle(&h.keyboards.hourly, h.hubAction("/hourly", h.sendHourly))
-	h.bot.Handle(&h.keyboards.daily, h.hubAction("/daily", h.sendDaily))
-	h.bot.Handle(&h.keyboards.statPrev, h.navigateHourly)
-	h.bot.Handle(&h.keyboards.statNext, h.navigateHourly)
-	h.bot.Handle(&h.keyboards.dayPrev, h.navigateDaily)
-	h.bot.Handle(&h.keyboards.dayNext, h.navigateDaily)
+	h.callback("hub-hourly", h.hubAction("/hourly", h.sendHourly))
+	h.callback("hub-daily", h.hubAction("/daily", h.sendDaily))
+	h.callback("stat-prev", h.navigateHourly)
+	h.callback("stat-next", h.navigateHourly)
+	h.callback("day-prev", h.navigateDaily)
+	h.callback("day-next", h.navigateDaily)
 }
 
-func (h *handlerRegistry) sendHourly(c tele.Context) error {
+func (h *handlerRegistry) sendHourly(c *updateContext) error {
 	resp, err := h.stats.hourly(0)
 	if err != nil {
-		return c.Send("Statistics unavailable (shutting down)")
+		return c.SendText("Statistics unavailable (shutting down)", "", nil)
 	}
 	text, kb := renderStatistics(resp)
-	if err := c.Send(text, markdown(kb)); err != nil {
+	if err := c.SendText(text, models.ParseModeMarkdown, kb); err != nil {
 		return err
 	}
 
@@ -43,57 +43,50 @@ func (h *handlerRegistry) sendHourly(c tele.Context) error {
 	}
 	sites.ActiveApp = browser.Domain(url)
 	sitesText, sitesKeyboard := renderSites(sites)
-	return c.Send(sitesText, markdown(sitesKeyboard))
+	return c.SendText(sitesText, models.ParseModeMarkdown, sitesKeyboard)
 }
 
-func (h *handlerRegistry) navigateHourly(c tele.Context) error {
-	shift := callbackShift(c)
-	resp, err := h.stats.hourly(shift)
-	if err == nil {
-		text, kb := renderStatistics(resp)
-		_ = c.Edit(text, markdown(kb))
+func (h *handlerRegistry) navigateHourly(c *updateContext) error {
+	resp, err := h.stats.hourly(callbackShift(c))
+	if err != nil {
+		return err
 	}
-	return c.Respond()
+	text, kb := renderStatistics(resp)
+	return c.EditText(text, models.ParseModeMarkdown, kb)
 }
 
-func (h *handlerRegistry) sendDaily(c tele.Context) error {
+func (h *handlerRegistry) sendDaily(c *updateContext) error {
 	resp, err := h.stats.daily(0)
 	if err != nil {
-		return c.Send("Statistics unavailable (shutting down)")
+		return c.SendText("Statistics unavailable (shutting down)", "", nil)
 	}
-	text, kb := renderDaily(resp)
-	return c.Send(text, markdown(kb))
+	return c.SendRichMessage(renderDailyRich(resp))
 }
 
-func (h *handlerRegistry) navigateDaily(c tele.Context) error {
+func (h *handlerRegistry) navigateDaily(c *updateContext) error {
 	resp, err := h.stats.daily(callbackShift(c))
-	if err == nil {
-		text, kb := renderDaily(resp)
-		_ = c.Edit(text, markdown(kb))
+	if err != nil {
+		return err
 	}
-	return c.Respond()
+	return c.EditRichMessage(renderDailyRich(resp))
 }
 
-func (h *handlerRegistry) sendAppInfo(c tele.Context) error {
-	name := strings.TrimSpace(c.Message().Payload)
+func (h *handlerRegistry) sendAppInfo(c *updateContext) error {
+	name := strings.TrimSpace(c.Payload())
 	if name == "" {
-		return c.Send("Usage: /info <app name from /status>")
+		return c.SendText("Usage: /info <app name from /status>", "", nil)
 	}
 	text, err := h.stats.appInfo(name)
 	if err != nil {
-		return c.Send("Unavailable (shutting down)")
+		return c.SendText("Unavailable (shutting down)", "", nil)
 	}
-	return c.Send("```\n"+text+"\n```", &tele.SendOptions{ParseMode: tele.ModeMarkdownV2})
+	return c.SendText("```\n"+text+"\n```", models.ParseModeMarkdown, nil)
 }
 
-func callbackShift(c tele.Context) int {
+func callbackShift(c *updateContext) int {
 	shift, _ := strconv.Atoi(c.Data())
 	if shift < 0 {
 		return 0
 	}
 	return shift
-}
-
-func markdown(kb *tele.ReplyMarkup) *tele.SendOptions {
-	return &tele.SendOptions{ParseMode: tele.ModeMarkdownV2, ReplyMarkup: kb}
 }

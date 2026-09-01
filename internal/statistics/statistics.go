@@ -81,7 +81,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				resp.ShiftHours = request.ShiftHours
 				resp.OlderShift, resp.HasOlder = storage.NearestShift(request.ShiftHours, true)
 				resp.NewerShift, resp.HasNewer = storage.NearestShift(request.ShiftHours, false)
-				if request.ShiftHours == 0 {
+				if request.ShiftHours == 0 && statstorage.ShouldTrackApplication(activeApplication) {
 					resp.ActiveApp = statstorage.DisplayName(activeApplication)
 				}
 				request.ResponseChan <- resp

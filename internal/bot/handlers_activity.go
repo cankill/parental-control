@@ -6,73 +6,67 @@ import (
 	"parental-control/internal/lib/types"
 	"strconv"
 	"strings"
-
-	tele "gopkg.in/telebot.v4"
 )
 
 const inputMonitoringHelp = "Activity tracking needs Input Monitoring permission. Add /opt/parentcontrol/parent-control in System Settings → Privacy & Security → Input Monitoring, enable it, then restart the ParentControl LaunchAgent."
 const inputMonitoringAlert = "Input Monitoring permission is required. Enable it in System Settings, then restart ParentControl."
 
 func (h *handlerRegistry) registerActivityHandlers() {
-	h.bot.Handle("/activity", h.sendActivityMenu)
-	h.bot.Handle(&h.keyboards.activity, h.hubAction("/activity", h.sendActivityMenu))
-	h.bot.Handle(&h.keyboards.activityHourly, h.selectActivityPeriod(types.ActivityHourly))
-	h.bot.Handle(&h.keyboards.activityDaily, h.selectActivityPeriod(types.ActivityDaily))
-	h.bot.Handle(&h.keyboards.activityWeekly, h.selectActivityPeriod(types.ActivityWeekly))
-	h.bot.Handle(&h.keyboards.activityPrev, h.navigateActivity)
-	h.bot.Handle(&h.keyboards.activityNext, h.navigateActivity)
+	h.command("activity", h.sendActivityMenu)
+	h.callback("hub-activity", h.hubAction("/activity", h.sendActivityMenu))
+	h.callback("activity-hourly", h.selectActivityPeriod(types.ActivityHourly))
+	h.callback("activity-daily", h.selectActivityPeriod(types.ActivityDaily))
+	h.callback("activity-weekly", h.selectActivityPeriod(types.ActivityWeekly))
+	h.callback("activity-prev", h.navigateActivity)
+	h.callback("activity-next", h.navigateActivity)
 }
 
-func (h *handlerRegistry) sendActivityMenu(c tele.Context) error {
-	return c.Send("Activity:", h.keyboards.activityMenu)
+func (h *handlerRegistry) sendActivityMenu(c *updateContext) error {
+	return c.SendText("Activity:", "", h.keyboards.activityMenu)
 }
 
-func (h *handlerRegistry) selectActivityPeriod(period types.ActivityPeriod) tele.HandlerFunc {
-	return func(c tele.Context) error {
-		_ = c.Edit("Activity: " + activityPeriodName(period))
-		err := h.sendActivity(c, period, 0)
-		_ = c.Respond()
-		return err
+func (h *handlerRegistry) selectActivityPeriod(period types.ActivityPeriod) handlerFunc {
+	return func(c *updateContext) error {
+		if err := c.EditText("Activity: "+activityPeriodName(period), "", nil); err != nil {
+			return err
+		}
+		return h.sendActivity(c, period, 0)
 	}
 }
 
-func (h *handlerRegistry) sendActivity(c tele.Context, period types.ActivityPeriod, shift int) error {
+func (h *handlerRegistry) sendActivity(c *updateContext, period types.ActivityPeriod, shift int) error {
 	if !activity.PreflightAccess() {
 		activity.RequestAccessOnce()
-		return c.Send(inputMonitoringHelp)
+		return c.SendText(inputMonitoringHelp, "", nil)
 	}
 	resp, err := h.stats.activity(period, shift)
 	if err != nil {
-		return c.Send("Activity unavailable (shutting down)")
+		return c.SendText("Activity unavailable (shutting down)", "", nil)
 	}
 	data, err := renderActivityPNG(resp)
 	if err != nil {
-		return c.Send("Could not render activity chart")
+		return c.SendText("Could not render activity chart", "", nil)
 	}
-	photo := &tele.Photo{File: tele.FromReader(bytes.NewReader(data)), Caption: activityCaption(resp)}
-	return c.Send(photo, &tele.SendOptions{ReplyMarkup: activityKeyboard(resp)})
+	return c.SendPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityKeyboard(resp))
 }
 
-func (h *handlerRegistry) navigateActivity(c tele.Context) error {
+func (h *handlerRegistry) navigateActivity(c *updateContext) error {
 	if !activity.PreflightAccess() {
-		return c.Respond(&tele.CallbackResponse{Text: inputMonitoringAlert, ShowAlert: true})
+		return c.AnswerCallback(inputMonitoringAlert, true)
 	}
 	period, shift, ok := parseActivityTarget(c.Data())
 	if !ok {
-		return c.Respond(&tele.CallbackResponse{Text: "Invalid activity period"})
+		return c.AnswerCallback("Invalid activity period", false)
 	}
 	resp, err := h.stats.activity(period, shift)
-	if err == nil {
-		data, renderErr := renderActivityPNG(resp)
-		if renderErr == nil {
-			photo := &tele.Photo{File: tele.FromReader(bytes.NewReader(data)), Caption: activityCaption(resp)}
-			_, err = h.bot.EditMedia(c.Message(), photo, &tele.SendOptions{ReplyMarkup: activityKeyboard(resp)})
-		}
-	}
 	if err != nil {
-		return c.Respond(&tele.CallbackResponse{Text: "Activity unavailable"})
+		return c.AnswerCallback("Activity unavailable", false)
 	}
-	return c.Respond()
+	data, err := renderActivityPNG(resp)
+	if err != nil {
+		return c.AnswerCallback("Activity unavailable", false)
+	}
+	return c.EditPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityKeyboard(resp))
 }
 
 func parseActivityTarget(data string) (types.ActivityPeriod, int, bool) {

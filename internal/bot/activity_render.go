@@ -11,6 +11,7 @@ import (
 	"parental-control/internal/lib/types"
 	"sort"
 
+	"github.com/go-telegram/bot/models"
 	"github.com/tdewolff/canvas"
 	"github.com/tdewolff/canvas/renderers/rasterizer"
 	"golang.org/x/image/font"
@@ -18,7 +19,6 @@ import (
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
-	tele "gopkg.in/telebot.v4"
 )
 
 const activityChartWidth, activityChartHeight = 900, 900
@@ -397,19 +397,18 @@ func activityCaption(resp *types.ActivityResponse) string {
 		activityPeriodName(resp.Period), resp.TimeStamp, formatActivityDuration(active))
 }
 
-func activityKeyboard(resp *types.ActivityResponse) *tele.ReplyMarkup {
-	kb := &tele.ReplyMarkup{}
-	buttons := []tele.Btn{}
+func activityKeyboard(resp *types.ActivityResponse) *models.InlineKeyboardMarkup {
+	buttons := []models.InlineKeyboardButton{}
 	if resp.HasOlder {
-		buttons = append(buttons, kb.Data("‹ Earlier", "activity-prev", activityNavigationData(resp.Period, resp.OlderShift)))
+		buttons = append(buttons, callbackButton("‹ Earlier", "activity-prev", activityNavigationData(resp.Period, resp.OlderShift)))
 	}
 	if resp.HasNewer {
-		buttons = append(buttons, kb.Data("Later ›", "activity-next", activityNavigationData(resp.Period, resp.NewerShift)))
+		buttons = append(buttons, callbackButton("Later ›", "activity-next", activityNavigationData(resp.Period, resp.NewerShift)))
 	}
-	if len(buttons) != 0 {
-		kb.Inline(kb.Row(buttons...))
+	if len(buttons) == 0 {
+		return nil
 	}
-	return kb
+	return inlineKeyboard(buttons...)
 }
 
 func activityNavigationData(period types.ActivityPeriod, shift int) string {

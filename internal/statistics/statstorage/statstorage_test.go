@@ -2,6 +2,7 @@ package statstorage
 
 import (
 	"parental-control/internal/lib/storage/local/diskvstorage"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,6 +63,36 @@ func TestIncreaseStatisticsSingleHour(t *testing.T) {
 	d := resp.AppInfos[0].Duration
 	if d < 90*time.Second || d > 3*time.Minute {
 		t.Errorf("duration %v not ~2m", d)
+	}
+}
+
+func TestLoginWindowIsTreatedAsIdle(t *testing.T) {
+	st := newTestStorage(t)
+	from := time.Now().Add(-2 * time.Minute)
+	st.IncreaseStatistics("com.apple.loginwindow", from)
+
+	if got := st.GetStatisticsShifted(0).AppInfos; len(got) != 0 {
+		t.Fatalf("loginwindow time was recorded as activity: %+v", got)
+	}
+}
+
+func TestStatisticsHideStoredLoginWindowTime(t *testing.T) {
+	st := newTestStorage(t)
+	bucket := time.Now().Format(TruncatedToHour)
+	st.localStorage.SaveValue(bucket, "com.google.Chrome", "60000")
+	st.localStorage.SaveValue(bucket, "com.apple.loginwindow", "300000")
+
+	stats := st.GetStatistics(bucket)
+	if len(stats) != 1 || stats[0].Identity != "Chrome" || stats[0].Duration != time.Minute {
+		t.Fatalf("filtered statistics = %+v, want only Chrome for 1m", stats)
+	}
+
+	table := stats.FormatTable()
+	if strings.Contains(strings.ToLower(table), "loginwindow") {
+		t.Fatalf("loginwindow leaked into rendered table:\n%s", table)
+	}
+	if !strings.Contains(table, "1m0s") || strings.Contains(table, "6m0s") {
+		t.Fatalf("rendered total includes idle time:\n%s", table)
 	}
 }
 
@@ -138,6 +169,8 @@ func TestNearestShiftSkipsGaps(t *testing.T) {
 		bucket := now.Add(-time.Duration(shift) * time.Hour).Format(TruncatedToHour)
 		st.localStorage.SaveValue(bucket, "com.test.app", "1000")
 	}
+	// Час только с loginwindow считается пустым и также перепрыгивается.
+	st.localStorage.SaveValue(now.Add(-time.Hour).Format(TruncatedToHour), "com.apple.loginwindow", "3600000")
 
 	if s, ok := st.NearestShift(0, true); !ok || s != 3 {
 		t.Fatalf("older from 0: got (%d,%v), want (3,true)", s, ok)
@@ -165,8 +198,13 @@ func TestGetStatisticsDayAndNav(t *testing.T) {
 	today := now.Format(TruncatedToDay)
 	st.localStorage.SaveValue(today+"T10", "com.google.Chrome", "60000")
 	st.localStorage.SaveValue(today+"T14", "com.google.Chrome", "30000")
-	d2 := now.AddDate(0, 0, -2).Format(TruncatedToDay) // вчера (shift 1) пуст
+	// Вчера было только окно входа: для статистики активности день пустой.
+	yesterday := now.AddDate(0, 0, -1).Format(TruncatedToDay)
+	st.localStorage.SaveValue(yesterday+"T12", "com.apple.loginwindow", "3600000")
+	d2 := now.AddDate(0, 0, -2).Format(TruncatedToDay)
 	st.localStorage.SaveValue(d2+"T09", "com.apple.Safari", "45000")
+	// Старое накопленное время loginwindow за сегодня не входит в дневной total.
+	st.localStorage.SaveValue(today+"T14", "com.apple.loginwindow", "300000")
 
 	resp := st.GetStatisticsDay(0)
 	if resp.TimeStamp != today {

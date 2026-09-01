@@ -4,46 +4,46 @@ import (
 	"fmt"
 	"parental-control/internal/browser"
 
-	tele "gopkg.in/telebot.v4"
+	"github.com/go-telegram/bot/models"
 )
 
 func (h *handlerRegistry) registerWebHandlers() {
-	h.bot.Handle("/url", h.sendURL)
-	h.bot.Handle("/sites", h.sendSites)
-	h.bot.Handle("/web", func(c tele.Context) error {
-		return c.Send("Web:", h.keyboards.web)
+	h.command("url", h.sendURL)
+	h.command("sites", h.sendSites)
+	h.command("web", func(c *updateContext) error {
+		return c.SendText("Web:", "", h.keyboards.web)
 	})
-	h.bot.Handle(&h.keyboards.url, h.hubAction("/url", h.sendURL))
-	h.bot.Handle(&h.keyboards.sites, h.hubAction("/sites", h.sendSites))
-	h.bot.Handle(&h.keyboards.sitesPrev, h.navigateSites)
-	h.bot.Handle(&h.keyboards.sitesNext, h.navigateSites)
+	h.callback("hub-url", h.hubAction("/url", h.sendURL))
+	h.callback("hub-sites", h.hubAction("/sites", h.sendSites))
+	h.callback("sites-prev", h.navigateSites)
+	h.callback("sites-next", h.navigateSites)
 }
 
-func (h *handlerRegistry) sendURL(c tele.Context) error {
+func (h *handlerRegistry) sendURL(c *updateContext) error {
 	url, err := browser.FrontmostBrowserURL()
 	if err != nil {
-		return c.Send(fmt.Sprintf("No browser URL: %s", err))
+		return c.SendText(fmt.Sprintf("No browser URL: %s", err), "", nil)
 	}
 	if url == "" {
-		return c.Send("No active browser tab")
+		return c.SendText("No active browser tab", "", nil)
 	}
-	return c.Send(url)
+	return c.SendText(url, "", nil)
 }
 
-func (h *handlerRegistry) sendSites(c tele.Context) error {
+func (h *handlerRegistry) sendSites(c *updateContext) error {
 	resp, err := h.stats.sites(0)
 	if err != nil {
-		return c.Send("Statistics unavailable (shutting down)")
+		return c.SendText("Statistics unavailable (shutting down)", "", nil)
 	}
 	text, kb := renderSites(resp)
-	return c.Send(text, markdown(kb))
+	return c.SendText(text, models.ParseModeMarkdown, kb)
 }
 
-func (h *handlerRegistry) navigateSites(c tele.Context) error {
+func (h *handlerRegistry) navigateSites(c *updateContext) error {
 	resp, err := h.stats.sites(callbackShift(c))
-	if err == nil {
-		text, kb := renderSites(resp)
-		_ = c.Edit(text, markdown(kb))
+	if err != nil {
+		return err
 	}
-	return c.Respond()
+	text, kb := renderSites(resp)
+	return c.EditText(text, models.ParseModeMarkdown, kb)
 }

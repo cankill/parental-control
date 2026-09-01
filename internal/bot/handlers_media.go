@@ -6,51 +6,49 @@ import (
 	"parental-control/internal/media"
 	"strconv"
 	"strings"
-
-	tele "gopkg.in/telebot.v4"
 )
 
 func (h *handlerRegistry) registerMediaHandlers() {
-	h.bot.Handle("/screen", h.sendScreen)
-	h.bot.Handle("/photo", h.sendPhoto)
-	h.bot.Handle("/record", h.sendRecord)
-	h.bot.Handle("/media", func(c tele.Context) error {
-		return c.Send("Media:", h.keyboards.media)
+	h.command("screen", h.sendScreen)
+	h.command("photo", h.sendPhoto)
+	h.command("record", h.sendRecord)
+	h.command("media", func(c *updateContext) error {
+		return c.SendText("Media:", "", h.keyboards.media)
 	})
-	h.bot.Handle(&h.keyboards.photo, h.hubAction("/photo", h.sendPhoto))
-	h.bot.Handle(&h.keyboards.screen, h.hubAction("/screen", h.sendScreen))
-	h.bot.Handle(&h.keyboards.record, h.hubAction("/record", h.sendRecord))
+	h.callback("hub-photo", h.hubAction("/photo", h.sendPhoto))
+	h.callback("hub-screen", h.hubAction("/screen", h.sendScreen))
+	h.callback("hub-record", h.hubAction("/record", h.sendRecord))
 }
 
-func (h *handlerRegistry) sendScreen(c tele.Context) error {
+func (h *handlerRegistry) sendScreen(c *updateContext) error {
 	fname, err := media.CaptureScreen()
 	if err != nil {
-		return c.Send(err.Error())
+		return c.SendText(err.Error(), "", nil)
 	}
 	defer os.Remove(fname)
-	return c.Send(&tele.Photo{File: tele.FromDisk(fname)})
+	return c.SendPhotoFile(fname)
 }
 
-func (h *handlerRegistry) sendPhoto(c tele.Context) error {
+func (h *handlerRegistry) sendPhoto(c *updateContext) error {
 	fname, err := media.CapturePhoto()
 	if err != nil {
-		return c.Send(fmt.Sprintf("Photo error: %s", err))
+		return c.SendText(fmt.Sprintf("Photo error: %s", err), "", nil)
 	}
 	defer os.Remove(fname)
-	return c.Send(&tele.Photo{File: tele.FromDisk(fname)})
+	return c.SendPhotoFile(fname)
 }
 
-func (h *handlerRegistry) sendRecord(c tele.Context) error {
+func (h *handlerRegistry) sendRecord(c *updateContext) error {
 	fname, err := media.RecordAudio(recordSeconds(c))
 	if err != nil {
-		return c.Send(fmt.Sprintf("Record error: %s", err))
+		return c.SendText(fmt.Sprintf("Record error: %s", err), "", nil)
 	}
 	defer os.Remove(fname)
-	return c.Send(&tele.Audio{File: tele.FromDisk(fname)})
+	return c.SendAudioFile(fname)
 }
 
-func recordSeconds(c tele.Context) int {
-	if payload := strings.TrimSpace(c.Message().Payload); payload != "" {
+func recordSeconds(c *updateContext) int {
+	if payload := strings.TrimSpace(c.Payload()); payload != "" {
 		if seconds, err := strconv.Atoi(payload); err == nil {
 			return seconds
 		}

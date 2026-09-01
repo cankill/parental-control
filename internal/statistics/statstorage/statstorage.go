@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	defaultDbPath   = "./database"
-	TruncatedToHour = "2006-01-02T15"
-	TruncatedToDay  = "2006-01-02"
+	defaultDbPath       = "./database"
+	loginWindowBundleID = "com.apple.loginwindow"
+	TruncatedToHour     = "2006-01-02T15"
+	TruncatedToDay      = "2006-01-02"
 )
 
 const activityBucketPrefix = "activity/"
@@ -45,6 +46,9 @@ func Open() *StatsStorage {
 
 func (s *StatsStorage) IncreaseStatistics(appName string, fromDate time.Time) time.Time {
 	toDate := time.Now()
+	if !ShouldTrackApplication(appName) {
+		return toDate
+	}
 	hours := int(toDate.Truncate(time.Hour).Sub(fromDate.Truncate(time.Hour))/time.Hour) + 1
 	for hours > 0 {
 		newToDate := fromDate.Truncate(time.Hour).Add(1 * time.Hour)
@@ -298,6 +302,9 @@ func (s *StatsStorage) nearestHourShift(prefix string, fromShift int, older bool
 		if err != nil {
 			continue
 		}
+		if prefix == "" && len(s.GetStatistics(bucket)) == 0 {
+			continue
+		}
 		shift := int(currentHour.Sub(t.Truncate(time.Hour)) / time.Hour)
 		if shift < 0 {
 			continue
@@ -364,9 +371,13 @@ func (s *StatsStorage) NearestDayShift(fromShift int, older bool) (int, bool) {
 	// Truncate(24h), который режет по UTC-полуночи.
 	haveDay := map[string]bool{}
 	for _, bucket := range s.localStorage.ListBuckets() {
-		if i := strings.IndexByte(bucket, 'T'); i >= 0 {
-			haveDay[bucket[:i]] = true
+		if _, err := time.ParseInLocation(TruncatedToHour, bucket, time.Local); err != nil {
+			continue
 		}
+		if len(s.GetStatistics(bucket)) == 0 {
+			continue
+		}
+		haveDay[bucket[:len(TruncatedToDay)]] = true
 	}
 	now := time.Now()
 	seen := map[int]bool{}
@@ -400,6 +411,9 @@ func mapToAppInfos(values map[string]string) types.AppInfos {
 	op := "statstorage.mapToAppInfos"
 	statistics := types.AppInfos{}
 	for appIdentity, millisecondsStr := range values {
+		if !ShouldTrackApplication(appIdentity) {
+			continue
+		}
 		milliseconds, err := strconv.ParseInt(millisecondsStr, 10, 64)
 		if err != nil {
 			fmt.Printf("%s: Problem converting value: %s to number with error: %s, skipping...\n", op, millisecondsStr, err)
@@ -411,6 +425,13 @@ func mapToAppInfos(values map[string]string) types.AppInfos {
 	}
 
 	return statistics
+}
+
+// ShouldTrackApplication reports whether foreground time for bundleID counts
+// as user activity. loginwindow means the Mac is locked or at the login screen,
+// so its time is intentionally treated as idle.
+func ShouldTrackApplication(bundleID string) bool {
+	return !strings.EqualFold(bundleID, loginWindowBundleID)
 }
 
 // DisplayName — отображаемое имя приложения из bundle id: последний сегмент после
@@ -427,7 +448,7 @@ const appInfoBucket = "apps"
 // ещё не известен. Вызывается при трекинге на смене активного приложения —
 // резолв (mdfind) выполняется один раз на приложение, а не на каждом событии.
 func (s *StatsStorage) RememberApp(bundleID string) {
-	if bundleID == "" || s.localStorage.GetValue(appInfoBucket, bundleID) != "" {
+	if bundleID == "" || !ShouldTrackApplication(bundleID) || s.localStorage.GetValue(appInfoBucket, bundleID) != "" {
 		return
 	}
 	info := appinfo.Resolve(bundleID)
