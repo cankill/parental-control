@@ -14,12 +14,6 @@ func renderStatistics(resp *types.AppInfoResponse) (string, *models.InlineKeyboa
 	return text, makeHourKeyboard(resp, "stat-prev", "stat-next")
 }
 
-func renderDaily(resp *types.AppInfoResponse) (string, *models.InlineKeyboardMarkup) {
-	resp.AppInfos.SortByDurationDesc()
-	text := "```\n" + "  Day: " + resp.TimeStamp + "\n\n" + resp.AppInfos.FormatTable() + "\n```"
-	return text, makeNavigationKeyboard(resp, "‹ Prev day", "day-prev", "Next day ›", "day-next")
-}
-
 func renderDailyRich(resp *types.AppInfoResponse) models.InputRichMessage {
 	resp.AppInfos.SortByDurationDesc()
 	rows := [][]models.RichBlockTableCell{

@@ -18,7 +18,6 @@ var defaultAdmins = []int64{183358896}
 type handlerFunc func(*updateContext) error
 
 type handlerRegistry struct {
-	ctx       context.Context
 	bot       *tgbot.Bot
 	stats     *statisticsClient
 	keyboards *keyboards
@@ -55,7 +54,6 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	}
 
 	h := &handlerRegistry{
-		ctx:       ctx,
 		bot:       b,
 		stats:     newStatisticsClient(ctx, requests),
 		keyboards: newKeyboards(),
@@ -154,6 +152,9 @@ func (h *handlerRegistry) hubAction(label string, action handlerFunc) handlerFun
 	return func(c *updateContext) error {
 		if err := c.EditText(label, "", nil); err != nil {
 			log.Printf("Edit hub message failed: %s", err)
+		}
+		if err := c.AnswerCallback("", false); err != nil {
+			log.Printf("Answer hub callback failed: %s", err)
 		}
 		return action(c)
 	}

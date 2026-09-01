@@ -39,6 +39,19 @@ func (c *updateContext) SendText(text string, parseMode models.ParseMode, markup
 	return err
 }
 
+func (c *updateContext) ReplyText(text string, markup models.ReplyMarkup) error {
+	if c.update.Message == nil {
+		return fmt.Errorf("update has no message to reply to")
+	}
+	_, err := c.bot.SendMessage(c.ctx, &tgbot.SendMessageParams{
+		ChatID:          c.update.Message.Chat.ID,
+		Text:            text,
+		ReplyMarkup:     markup,
+		ReplyParameters: &models.ReplyParameters{MessageID: c.update.Message.ID},
+	})
+	return err
+}
+
 func (c *updateContext) SendRichMessage(message models.InputRichMessage) error {
 	chatID, ok := c.chatID()
 	if !ok {

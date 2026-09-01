@@ -10,7 +10,7 @@ import (
 
 func (h *handlerRegistry) registerYoutubeHandlers() {
 	h.command("youtube", func(c *updateContext) error {
-		return c.SendText("For how long?", "", h.keyboards.youtube)
+		return c.ReplyText("For how long?", h.keyboards.youtube)
 	})
 	h.callback("30-minutes", h.youtubeDuration(30*time.Minute, "30 minutes"))
 	h.callback("1-hour", h.youtubeDuration(time.Hour, "1 hour"))
