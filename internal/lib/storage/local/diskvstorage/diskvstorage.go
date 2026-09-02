@@ -32,7 +32,11 @@ func (s *LocalStorage) SaveValue(bucketName, key string, value string) {
 func (s *LocalStorage) GetValues(bucketName string) map[string]string {
 	result := make(map[string]string)
 	cancel := make(<-chan struct{})
-	keys := s.db.KeysPrefix(bucketName, cancel)
+	// The trailing slash is significant for diskv's AdvancedTransform: without
+	// it the transformed prefix has no directory component, so KeysPrefix walks
+	// the entire database and filters afterward instead of opening this bucket.
+	prefix := strings.TrimSuffix(bucketName, "/") + "/"
+	keys := s.db.KeysPrefix(prefix, cancel)
 	for key := range keys {
 		value := s.db.ReadString(key)
 		_, file := splitBucket(key)

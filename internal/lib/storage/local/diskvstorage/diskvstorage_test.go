@@ -1,6 +1,8 @@
 package diskvstorage
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -46,5 +48,34 @@ func TestSaveGetAndListBuckets(t *testing.T) {
 	buckets := s.ListBuckets()
 	if len(buckets) != 2 || buckets[0] != "2026-07-15T10" || buckets[1] != "2026-07-15T11" {
 		t.Errorf("ListBuckets = %v, want sorted [T10 T11]", buckets)
+	}
+}
+
+func TestGetValuesOnlyWalksRequestedBucket(t *testing.T) {
+	root := t.TempDir()
+	s := OpenStorage(root)
+	s.SaveValue("target", "com.google.Chrome", "12345")
+
+	// A root-wide filepath.Walk would enter this sibling before "target" and
+	// fail. A correctly scoped KeysPrefix starts directly in target/.
+	blocked := filepath.Join(root, "000-blocked")
+	if err := os.Mkdir(blocked, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(blocked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(blocked, 0700); err != nil {
+			t.Errorf("restore blocked directory permissions: %v", err)
+		}
+	})
+	if _, err := os.ReadDir(blocked); err == nil {
+		t.Skip("test process can read mode-000 directories")
+	}
+
+	values := s.GetValues("target")
+	if len(values) != 1 || values["com.google.Chrome"] != "12345" {
+		t.Fatalf("GetValues(target) = %v", values)
 	}
 }
