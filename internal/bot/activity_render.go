@@ -27,6 +27,8 @@ const activityCenterX, activityCenterY = 450, 450
 const activityInnerRadius, activityOuterRadius = 70.0, 365.0
 const activityClockRadius = 390.0
 const activityWorkdaySeconds = 8 * 60 * 60
+const activitySmallFontSize = 11.0
+const activityScaleFontSize = activitySmallFontSize * 1.2
 
 var (
 	chartBackground = color.RGBA{248, 250, 252, 255}
@@ -302,11 +304,16 @@ func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 		return nil, fmt.Errorf("create chart font: %w", err)
 	}
 	defer regularFace.Close()
-	smallFace, err := newChartFace(chartRegular, 11)
+	smallFace, err := newChartFace(chartRegular, activitySmallFontSize)
 	if err != nil {
 		return nil, fmt.Errorf("create small chart font: %w", err)
 	}
 	defer smallFace.Close()
+	scaleFace, err := newChartFace(chartRegular, activityScaleFontSize)
+	if err != nil {
+		return nil, fmt.Errorf("create chart scale font: %w", err)
+	}
+	defer scaleFace.Close()
 	titleFace, err := newChartFace(chartBold, 34)
 	if err != nil {
 		return nil, fmt.Errorf("create chart title font: %w", err)
@@ -321,7 +328,7 @@ func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 	buckets := activityBuckets(resp)
 	totalSeconds, maximumSeconds := activityMetrics(buckets)
 
-	drawActivityGrid(ctx, img, smallFace, maximumSeconds, len(buckets))
+	drawActivityGrid(ctx, img, scaleFace, maximumSeconds, len(buckets))
 	drawActivityBars(ctx, buckets, maximumSeconds)
 	drawActivityClock(ctx, img, regularFace, resp.Period, len(buckets))
 	drawCanvasCircle(ctx, activityInnerRadius-12, 2, chartBackground, chartAxis)
@@ -367,7 +374,7 @@ func formatActivityDuration(seconds int) string {
 		parts = append(parts, fmt.Sprintf("%d %s", value, name))
 	}
 	if len(parts) == 0 {
-		return "0 seconds"
+		return "No Activity"
 	}
 	return strings.Join(parts, ", ")
 }
@@ -392,6 +399,12 @@ func formatActivityPercent(value float64) string {
 
 func activityCaption(resp *types.ActivityResponse) models.RichText {
 	totalSeconds, _ := activityMetrics(activityBuckets(resp))
+	if totalSeconds == 0 {
+		return richTextSequence(
+			richText(activityPeriodLabel(resp.Period)+": "), richBold(formatReportTimestamp(resp.TimeStamp)),
+			richText("\nNo Activity"),
+		)
+	}
 	efficiency := 0.0
 	if resp.PeakSeconds > 0 {
 		efficiency = float64(totalSeconds) * 100 / float64(resp.PeakSeconds)
@@ -401,6 +414,17 @@ func activityCaption(resp *types.ActivityResponse) models.RichText {
 		richText("\nActivity: "), richBold(formatActivityDuration(totalSeconds)),
 		richText("\nEfficiency: "), richBold(formatActivityPercent(efficiency)), richText(" of record"),
 	)
+}
+
+func renderNoActivity(resp *types.ActivityResponse) models.InputRichMessage {
+	blocks := []models.InputRichBlock{
+		richHeading(activityPeriodLabel(resp.Period) + ": " + formatReportTimestamp(resp.TimeStamp)),
+		richParagraph("No Activity"),
+	}
+	if buttons := activityButtons(resp); len(buttons) > 0 {
+		blocks = append(blocks, richButtons(buttons...))
+	}
+	return models.InputRichMessage{Blocks: blocks}
 }
 
 func activityButtons(resp *types.ActivityResponse) []models.RichMessageButton {

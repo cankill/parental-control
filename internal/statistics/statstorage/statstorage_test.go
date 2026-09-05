@@ -26,6 +26,19 @@ func TestDisplayName(t *testing.T) {
 	}
 }
 
+func TestShouldTrackDomain(t *testing.T) {
+	for _, domain := range []string{"", "newtab", "NewTab", "new-tab-page", "startpage", "favorites"} {
+		if ShouldTrackDomain(domain) {
+			t.Errorf("ShouldTrackDomain(%q) = true, want false", domain)
+		}
+	}
+	for _, domain := range []string{"example.com", "newtab.example.com", "blank.page"} {
+		if !ShouldTrackDomain(domain) {
+			t.Errorf("ShouldTrackDomain(%q) = false, want true", domain)
+		}
+	}
+}
+
 // FindAppInfoByName ищет по отображаемому имени (без учёта регистра) и возвращает
 // все совпадения. Сохраняем метаданные напрямую в store (минуя mdfind-резолв).
 func TestFindAppInfoByName(t *testing.T) {
@@ -66,13 +79,23 @@ func TestIncreaseStatisticsSingleHour(t *testing.T) {
 	}
 }
 
-func TestLoginWindowIsTreatedAsIdle(t *testing.T) {
+func TestLoginWindowIsStoredButExcludedFromStatistics(t *testing.T) {
 	st := newTestStorage(t)
 	from := time.Now().Add(-2 * time.Minute)
 	st.IncreaseStatistics("com.apple.loginwindow", from)
 
+	stored := false
+	for _, bucket := range st.localStorage.ListBuckets() {
+		if st.localStorage.GetValue(bucket, "com.apple.loginwindow") != "" {
+			stored = true
+			break
+		}
+	}
+	if !stored {
+		t.Fatal("loginwindow raw time was not stored")
+	}
 	if got := st.GetStatisticsShifted(0).AppInfos; len(got) != 0 {
-		t.Fatalf("loginwindow time was recorded as activity: %+v", got)
+		t.Fatalf("loginwindow time was included in calculated statistics: %+v", got)
 	}
 }
 
@@ -138,8 +161,10 @@ func TestDomainStatistics(t *testing.T) {
 	st.AddDomainTime("youtube.com", 30000)
 	st.AddDomainTime("youtube.com", 15000) // накопление → 45s
 	st.AddDomainTime("github.com", 20000)
-	st.AddDomainTime("", 5000)             // пустой домен игнорируется
-	st.AddDomainTime("example.com", -1000) // не положительное время игнорируется
+	st.AddDomainTime("newtab", 60000)       // хранится, но не входит в расчёт
+	st.AddDomainTime("new-tab-page", 60000) // вариант Chromium
+	st.AddDomainTime("", 5000)              // пустой домен игнорируется
+	st.AddDomainTime("example.com", -1000)  // не положительное время игнорируется
 
 	resp := st.GetDomainStatistics(0)
 	got := map[string]time.Duration{}
@@ -155,9 +180,27 @@ func TestDomainStatistics(t *testing.T) {
 	if len(resp.AppInfos) != 2 {
 		t.Fatalf("expected 2 domains, got %d: %+v", len(resp.AppInfos), resp.AppInfos)
 	}
+	bucket := domainBucketPrefix + time.Now().Format(TruncatedToHour)
+	if st.localStorage.GetValue(bucket, "newtab") != "60000" {
+		t.Fatal("newtab raw time must remain stored")
+	}
 	// Домены не попадают в статистику приложений (разные bucket-префиксы).
 	if len(st.GetStatisticsShifted(0).AppInfos) != 0 {
 		t.Fatalf("app stats should be empty, domains leaked in")
+	}
+}
+
+func TestNearestDomainShiftSkipsNewTabOnlyBuckets(t *testing.T) {
+	st := newTestStorage(t)
+	now := time.Now().Truncate(time.Hour)
+	st.localStorage.SaveValue(domainBucketPrefix+now.Add(-time.Hour).Format(TruncatedToHour), "newtab", "60000")
+	st.localStorage.SaveValue(domainBucketPrefix+now.Add(-3*time.Hour).Format(TruncatedToHour), "example.com", "60000")
+
+	if shift, ok := st.NearestDomainShift(0, true); !ok || shift != 3 {
+		t.Fatalf("older domain shift = (%d,%v), want (3,true)", shift, ok)
+	}
+	if _, ok := st.NearestDomainShift(3, true); ok {
+		t.Fatal("newtab-only bucket must not be available for navigation")
 	}
 }
 

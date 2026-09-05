@@ -206,6 +206,40 @@ func TestActivityMetricsAndCaption(t *testing.T) {
 	}
 }
 
+func TestNoActivityMessageKeepsPeriodAndNavigation(t *testing.T) {
+	response := &types.ActivityResponse{
+		Period:     types.ActivityHourly,
+		TimeStamp:  "2026-09-05T14",
+		HasOlder:   true,
+		OlderShift: 3,
+	}
+	caption := activityCaption(response)
+	if len(caption.Array) != 3 || caption.Array[2].PlainText != "\nNo Activity" {
+		t.Fatalf("empty caption = %#v", caption.Array)
+	}
+
+	message := renderNoActivity(response)
+	if len(message.Blocks) != 3 {
+		t.Fatalf("empty activity blocks = %d, want heading, message, and navigation", len(message.Blocks))
+	}
+	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Hour: 05.09 14:00" {
+		t.Fatalf("empty activity heading = %q", got)
+	}
+	if got := message.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "No Activity" {
+		t.Fatalf("empty activity text = %q", got)
+	}
+	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
+	if len(buttons) != 1 || buttons[0].CallbackData != "\factivity-prev|0:3" {
+		t.Fatalf("empty activity navigation = %#v", buttons)
+	}
+}
+
+func TestActivityScaleFontIsTwentyPercentLarger(t *testing.T) {
+	if got, want := activityScaleFontSize, activitySmallFontSize*1.2; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("scale font size = %v, want %v", got, want)
+	}
+}
+
 func TestActivityNavigationData(t *testing.T) {
 	data := activityNavigationData(types.ActivityWeekly, 3)
 	period, shift, ok := parseActivityTarget(data)

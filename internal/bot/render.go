@@ -31,12 +31,28 @@ func renderUsageRich(title string, resp *types.AppInfoResponse, previousText, pr
 }
 
 func renderUsageRichWithLabel(title, identityLabel string, resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) models.InputRichMessage {
-	resp.AppInfos.SortByDurationDesc()
+	statistics := make(types.AppInfos, 0, len(resp.AppInfos))
+	for _, app := range resp.AppInfos {
+		if app.Duration > 0 {
+			statistics = append(statistics, app)
+		}
+	}
+	statistics.SortByDurationDesc()
+	blocks := []models.InputRichBlock{richHeading(title)}
+	if len(statistics) == 0 {
+		blocks = append(blocks, richParagraph("No Statistics"))
+		buttons := makeNavigationRichButtons(resp, previousText, previousID, nextText, nextID)
+		if len(buttons) > 0 {
+			blocks = append(blocks, richButtons(buttons...))
+		}
+		return models.InputRichMessage{Blocks: blocks}
+	}
+
 	rows := [][]models.RichBlockTableCell{
 		{richTableCell(identityLabel, true, "left"), richTableCell("Time", true, "right")},
 	}
 	total := time.Duration(0)
-	for _, app := range resp.AppInfos {
+	for _, app := range statistics {
 		name := app.Identity
 		if resp.ActiveApp != "" && app.Identity == resp.ActiveApp {
 			name = "● " + name
@@ -52,15 +68,14 @@ func renderUsageRichWithLabel(title, identityLabel string, resp *types.AppInfoRe
 		richTableCell(formatCompactDuration(total), true, "right"),
 	})
 
-	blocks := []models.InputRichBlock{
-		richHeading(title),
-		{
+	blocks = append(blocks,
+		models.InputRichBlock{
 			Type: models.RichBlockTypeTable,
 			InputRichBlockTable: &models.InputRichBlockTable{
 				Cells: rows, IsCompact: true,
 			},
 		},
-	}
+	)
 	buttons := makeNavigationRichButtons(resp, previousText, previousID, nextText, nextID)
 	if len(buttons) > 0 {
 		blocks = append(blocks, richButtons(buttons...))
@@ -232,7 +247,7 @@ func formatReportTimestamp(value string) string {
 			continue
 		}
 		if layout == "2006-01-02T15" {
-			return parsed.Format("02.01, 15:00")
+			return parsed.Format("02.01 15:00")
 		}
 		return parsed.Format("02.01")
 	}

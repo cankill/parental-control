@@ -123,11 +123,32 @@ func TestRenderDailyRich(t *testing.T) {
 func TestRenderDailyRichWithoutNavigation(t *testing.T) {
 	message := renderDailyRich(&types.AppInfoResponse{TimeStamp: "2026-09-02"})
 	if len(message.Blocks) != 2 {
-		t.Fatalf("rich blocks = %d, want heading and table", len(message.Blocks))
+		t.Fatalf("rich blocks = %d, want heading and empty-state text", len(message.Blocks))
 	}
-	table := message.Blocks[1].InputRichBlockTable
-	if table == nil || len(table.Cells) != 2 {
-		t.Fatalf("empty table rows = %#v, want header and zero total", table)
+	paragraph := message.Blocks[1].InputRichBlockParagraph
+	if paragraph == nil || paragraph.Text.PlainText != "No Statistics" {
+		t.Fatalf("empty-state paragraph = %#v, want No Statistics", paragraph)
+	}
+}
+
+func TestRenderEmptyStatisticsKeepsNavigation(t *testing.T) {
+	message := renderSites(&types.AppInfoResponse{
+		TimeStamp:  "2026-09-02T09",
+		HasOlder:   true,
+		OlderShift: 4,
+	})
+	if len(message.Blocks) != 3 {
+		t.Fatalf("rich blocks = %d, want heading, empty state, and navigation", len(message.Blocks))
+	}
+	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Sites: 02.09 09:00" {
+		t.Fatalf("heading = %q", got)
+	}
+	if got := message.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "No Statistics" {
+		t.Fatalf("empty state = %q", got)
+	}
+	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
+	if len(buttons) != 1 || buttons[0].CallbackData != "\fsites-prev|4" {
+		t.Fatalf("navigation buttons = %#v", buttons)
 	}
 }
 
@@ -166,7 +187,7 @@ func TestRenderWeeklyRichAndStatsMenu(t *testing.T) {
 
 func TestFormatActivityDuration(t *testing.T) {
 	tests := map[int]string{
-		0:     "0 seconds",
+		0:     "No Activity",
 		1:     "1 second",
 		60:    "1 minute",
 		1000:  "16 minutes, 40 seconds",
@@ -186,7 +207,7 @@ func TestCompactDurationAndReportTimestamp(t *testing.T) {
 	}
 	tests := map[string]string{
 		"2026-08-24":                    "24.08",
-		"2026-08-24T09":                 "24.08, 09:00",
+		"2026-08-24T09":                 "24.08 09:00",
 		"2026-08-24 – 2026-08-30":       "24.08 - 30.08",
 		"already human-readable period": "already human-readable period",
 	}

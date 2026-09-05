@@ -46,9 +46,6 @@ func Open() *StatsStorage {
 
 func (s *StatsStorage) IncreaseStatistics(appName string, fromDate time.Time) time.Time {
 	toDate := time.Now()
-	if !ShouldTrackApplication(appName) {
-		return toDate
-	}
 	hours := int(toDate.Truncate(time.Hour).Sub(fromDate.Truncate(time.Hour))/time.Hour) + 1
 	for hours > 0 {
 		newToDate := fromDate.Truncate(time.Hour).Add(1 * time.Hour)
@@ -115,9 +112,15 @@ func mapDomainsToAppInfos(values map[string]string) types.AppInfos {
 	const op = "statstorage.mapDomainsToAppInfos"
 	stats := types.AppInfos{}
 	for domain, msStr := range values {
+		if !ShouldTrackDomain(domain) {
+			continue
+		}
 		ms, err := strconv.ParseInt(msStr, 10, 64)
 		if err != nil {
 			fmt.Printf("%s: bad value %s: %s, skipping\n", op, msStr, err)
+			continue
+		}
+		if ms <= 0 {
 			continue
 		}
 		stats = append(stats, types.AppInfo{Identity: domain, Duration: time.Duration(ms) * time.Millisecond})
@@ -334,8 +337,15 @@ func (s *StatsStorage) nearestHourShift(prefix string, fromShift int, older bool
 		if err != nil {
 			continue
 		}
-		if prefix == "" && len(s.GetStatistics(bucket)) == 0 {
-			continue
+		switch prefix {
+		case "":
+			if len(s.GetStatistics(bucket)) == 0 {
+				continue
+			}
+		case domainBucketPrefix:
+			if len(mapDomainsToAppInfos(s.localStorage.GetValues(bucket))) == 0 {
+				continue
+			}
 		}
 		shift := int(currentHour.Sub(t.Truncate(time.Hour)) / time.Hour)
 		if shift < 0 {
@@ -507,6 +517,9 @@ func mapToAppInfos(values map[string]string) types.AppInfos {
 			fmt.Printf("%s: Problem converting value: %s to number with error: %s, skipping...\n", op, millisecondsStr, err)
 			continue
 		}
+		if milliseconds <= 0 {
+			continue
+		}
 		duration := time.Duration(milliseconds * 1000000)
 
 		statistics = append(statistics, types.AppInfo{Identity: DisplayName(appIdentity), Duration: duration})
@@ -515,11 +528,25 @@ func mapToAppInfos(values map[string]string) types.AppInfos {
 	return statistics
 }
 
-// ShouldTrackApplication reports whether foreground time for bundleID counts
-// as user activity. loginwindow means the Mac is locked or at the login screen,
-// so its time is intentionally treated as idle.
+// ShouldTrackApplication reports whether stored foreground time for bundleID
+// counts in calculated statistics. Raw loginwindow time remains stored so the
+// reporting rule can be changed without losing source data.
 func ShouldTrackApplication(bundleID string) bool {
 	return !strings.EqualFold(bundleID, loginWindowBundleID)
+}
+
+// ShouldTrackDomain reports whether a stored browser-domain key represents
+// user content. Internal blank/start tabs remain in storage but are excluded
+// from reports, totals, and navigation.
+func ShouldTrackDomain(domain string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(domain))
+	normalized = strings.TrimSuffix(normalized, ".")
+	switch normalized {
+	case "", "blank", "newtab", "new-tab", "new-tab-page", "newtab-page", "startpage", "start-page", "favorites":
+		return false
+	default:
+		return true
+	}
 }
 
 // DisplayName — отображаемое имя приложения из bundle id: последний сегмент после
