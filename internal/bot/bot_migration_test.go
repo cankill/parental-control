@@ -97,8 +97,8 @@ func TestRenderDailyRich(t *testing.T) {
 	if got := table.Cells[1][0].Text.PlainText; got != "Terminal" {
 		t.Fatalf("first app = %q, want duration-sorted Terminal", got)
 	}
-	if got := table.Cells[3][1].Text.PlainText; got != "7m0s" {
-		t.Fatalf("total = %q, want 7m0s", got)
+	if got := table.Cells[3][1].Text.PlainText; got != "7m 0s" {
+		t.Fatalf("total = %q, want 7m 0s", got)
 	}
 	buttons := message.Blocks[2].InputRichBlockButtons
 	if buttons == nil || len(buttons.Buttons) != 2 {
@@ -136,7 +136,7 @@ func TestRenderWeeklyRichAndStatsMenu(t *testing.T) {
 		TimeStamp: "2026-08-31 – 2026-09-06",
 		HasOlder:  true, OlderShift: 2,
 	})
-	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Week 2026-08-31 – 2026-09-06" {
+	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Week: 31.08 - 06.09" {
 		t.Fatalf("weekly heading = %q", got)
 	}
 	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
@@ -176,6 +176,23 @@ func TestFormatActivityDuration(t *testing.T) {
 	for seconds, want := range tests {
 		if got := formatActivityDuration(seconds); got != want {
 			t.Errorf("formatActivityDuration(%d) = %q, want %q", seconds, got, want)
+		}
+	}
+}
+
+func TestCompactDurationAndReportTimestamp(t *testing.T) {
+	if got := formatCompactDuration(3*time.Hour + 10*time.Minute + 11731*time.Millisecond); got != "3h 10m 11.731s" {
+		t.Fatalf("compact duration = %q", got)
+	}
+	tests := map[string]string{
+		"2026-08-24":                    "24.08",
+		"2026-08-24T09":                 "24.08, 09:00",
+		"2026-08-24 – 2026-08-30":       "24.08 - 30.08",
+		"already human-readable period": "already human-readable period",
+	}
+	for input, want := range tests {
+		if got := formatReportTimestamp(input); got != want {
+			t.Errorf("formatReportTimestamp(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

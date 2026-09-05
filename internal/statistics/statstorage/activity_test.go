@@ -90,6 +90,30 @@ func TestGetActivityGroupsHourDayAndWeek(t *testing.T) {
 	}
 }
 
+func TestGetActivityPeakByPeriod(t *testing.T) {
+	now := time.Now().Truncate(time.Hour)
+	tests := []struct {
+		name   string
+		period types.ActivityPeriod
+		older  time.Time
+	}{
+		{"hourly", types.ActivityHourly, now.Add(-2 * time.Hour)},
+		{"daily", types.ActivityDaily, now.AddDate(0, 0, -2)},
+		{"weekly", types.ActivityWeekly, now.AddDate(0, 0, -14)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := activityStorage(t)
+			saveActivityBucket(t, s, now, types.ActivityBucket{BothSeconds: 10})
+			saveActivityBucket(t, s, tt.older, types.ActivityBucket{BothSeconds: 40})
+			response := s.GetActivity(tt.period, 0)
+			if response.PeakSeconds != 40 {
+				t.Fatalf("peak seconds = %d, want 40", response.PeakSeconds)
+			}
+		})
+	}
+}
+
 func TestNearestActivityShiftByPeriod(t *testing.T) {
 	now := time.Now()
 	t.Run("hourly", func(t *testing.T) {

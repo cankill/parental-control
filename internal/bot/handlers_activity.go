@@ -46,7 +46,7 @@ func (h *handlerRegistry) sendActivity(c *updateContext, period types.ActivityPe
 	if err != nil {
 		return c.RespondRichMessage(renderNotice("Activity unavailable", "Could not render the activity chart."))
 	}
-	return c.RespondRichMessage(renderPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
+	return c.RespondRichMessage(renderPhotoWithRichCaption(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
 }
 
 func (h *handlerRegistry) navigateActivity(c *updateContext) error {
@@ -65,7 +65,7 @@ func (h *handlerRegistry) navigateActivity(c *updateContext) error {
 	if err != nil {
 		return c.AnswerCallback("Activity unavailable", false)
 	}
-	return c.EditRichMessage(renderPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
+	return c.EditRichMessage(renderPhotoWithRichCaption(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
 }
 
 func parseActivityTarget(data string) (types.ActivityPeriod, int, bool) {

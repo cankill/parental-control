@@ -4,25 +4,26 @@ import (
 	"io"
 	"parental-control/internal/lib/types"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-telegram/bot/models"
 )
 
 func renderStatistics(resp *types.AppInfoResponse) models.InputRichMessage {
-	return renderUsageRich("Hour "+resp.TimeStamp, resp, "‹", "stat-prev", "›", "stat-next")
+	return renderUsageRich("Hour: "+formatReportTimestamp(resp.TimeStamp), resp, "‹", "stat-prev", "›", "stat-next")
 }
 
 func renderDailyRich(resp *types.AppInfoResponse) models.InputRichMessage {
-	return renderUsageRich("Day "+resp.TimeStamp, resp, "‹", "day-prev", "›", "day-next")
+	return renderUsageRich("Day: "+formatReportTimestamp(resp.TimeStamp), resp, "‹", "day-prev", "›", "day-next")
 }
 
 func renderWeeklyRich(resp *types.AppInfoResponse) models.InputRichMessage {
-	return renderUsageRich("Week "+resp.TimeStamp, resp, "‹", "week-prev", "›", "week-next")
+	return renderUsageRich("Week: "+formatReportTimestamp(resp.TimeStamp), resp, "‹", "week-prev", "›", "week-next")
 }
 
 func renderSites(resp *types.AppInfoResponse) models.InputRichMessage {
-	return renderUsageRichWithLabel("Sites "+resp.TimeStamp, "Site", resp, "‹", "sites-prev", "›", "sites-next")
+	return renderUsageRichWithLabel("Sites: "+formatReportTimestamp(resp.TimeStamp), "Site", resp, "‹", "sites-prev", "›", "sites-next")
 }
 
 func renderUsageRich(title string, resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) models.InputRichMessage {
@@ -42,13 +43,13 @@ func renderUsageRichWithLabel(title, identityLabel string, resp *types.AppInfoRe
 		}
 		rows = append(rows, []models.RichBlockTableCell{
 			richTableCell(name, false, "left"),
-			richTableCell(app.Duration.String(), false, "right"),
+			richTableCell(formatCompactDuration(app.Duration), false, "right"),
 		})
 		total += app.Duration
 	}
 	rows = append(rows, []models.RichBlockTableCell{
 		richTableCell("Total", true, "left"),
-		richTableCell(total.String(), true, "right"),
+		richTableCell(formatCompactDuration(total), true, "right"),
 	})
 
 	blocks := []models.InputRichBlock{
@@ -107,10 +108,14 @@ func renderPreformatted(title, text string) models.InputRichMessage {
 }
 
 func renderPhoto(reader io.Reader, filename, caption string, buttons ...models.RichMessageButton) models.InputRichMessage {
+	return renderPhotoWithRichCaption(reader, filename, richText(caption), buttons...)
+}
+
+func renderPhotoWithRichCaption(reader io.Reader, filename string, caption models.RichText, buttons ...models.RichMessageButton) models.InputRichMessage {
 	photo := models.InputMediaPhoto{Media: "attach://" + filename, MediaAttachment: reader}
 	block := models.InputRichBlock{
 		Type:                models.RichBlockTypePhoto,
-		InputRichBlockPhoto: &models.InputRichBlockPhoto{Photo: photo, Caption: richCaption(caption)},
+		InputRichBlockPhoto: &models.InputRichBlockPhoto{Photo: photo, Caption: richCaptionText(caption)},
 	}
 	blocks := []models.InputRichBlock{block}
 	if len(buttons) > 0 {
@@ -134,8 +139,25 @@ func richCaption(text string) *models.RichBlockCaption {
 	return &models.RichBlockCaption{Text: richText(text)}
 }
 
+func richCaptionText(text models.RichText) *models.RichBlockCaption {
+	return &models.RichBlockCaption{Text: text}
+}
+
 func richText(text string) models.RichText {
 	return models.RichText{PlainText: text}
+}
+
+func richBold(text string) models.RichText {
+	return models.RichText{
+		Type: models.RichTextTypeBold,
+		RichTextBold: &models.RichTextBold{
+			Text: richText(text),
+		},
+	}
+}
+
+func richTextSequence(parts ...models.RichText) models.RichText {
+	return models.RichText{Array: parts}
 }
 
 func richHeading(text string) models.InputRichBlock {
@@ -177,4 +199,42 @@ func makeNavigationRichButtons(resp *types.AppInfoResponse, previousText, previo
 		buttons = append(buttons, richCallbackButton(nextText, nextID, strconv.Itoa(resp.NewerShift)))
 	}
 	return buttons
+}
+
+func formatCompactDuration(duration time.Duration) string {
+	value := duration.String()
+	var formatted strings.Builder
+	formatted.Grow(len(value) + 3)
+	var previous rune
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			if previous == 'h' || previous == 'm' || previous == 's' || previous == 'µ' {
+				formatted.WriteByte(' ')
+			}
+		}
+		formatted.WriteRune(r)
+		previous = r
+	}
+	return formatted.String()
+}
+
+func formatReportTimestamp(value string) string {
+	if parts := strings.SplitN(value, " - ", 2); len(parts) == 2 {
+		return formatReportTimestamp(strings.TrimSpace(parts[0])) + " - " + formatReportTimestamp(strings.TrimSpace(parts[1]))
+	}
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == '–' })
+	if len(parts) == 2 {
+		return formatReportTimestamp(strings.TrimSpace(parts[0])) + " - " + formatReportTimestamp(strings.TrimSpace(parts[1]))
+	}
+	for _, layout := range []string{"2006-01-02T15", "2006-01-02"} {
+		parsed, err := time.ParseInLocation(layout, strings.TrimSpace(value), time.Local)
+		if err != nil {
+			continue
+		}
+		if layout == "2006-01-02T15" {
+			return parsed.Format("02.01, 15:00")
+		}
+		return parsed.Format("02.01")
+	}
+	return value
 }

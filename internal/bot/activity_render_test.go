@@ -37,9 +37,9 @@ func TestRenderActivityPNG(t *testing.T) {
 	assertPixelColor(t, img.At(activityCenterX+7, barY), mouseColor)
 	assertPixelColor(t, img.At(activityCenterX+12, barY), totalColor)
 
-	mouseOnlyY := activityCenterY - int(activityInnerRadius+50)
+	mouseOnlyY := activityCenterY - int(activityInnerRadius+150)
 	assertPixelColor(t, img.At(activityCenterX, mouseOnlyY), mouseColor)
-	totalOnlyY := activityCenterY - int(activityInnerRadius+70)
+	totalOnlyY := activityCenterY - int(activityInnerRadius+250)
 	assertPixelColor(t, img.At(activityCenterX, totalOnlyY), totalColor)
 }
 
@@ -172,6 +172,37 @@ func TestActivityRadialGeometry(t *testing.T) {
 	}
 	if got, want := activityBarLength(30, 300), (activityOuterRadius-activityInnerRadius)/10; math.Abs(got-want) > 1e-9 {
 		t.Fatalf("30-second bar length = %v, want %v", got, want)
+	}
+}
+
+func TestActivityMetricsAndCaption(t *testing.T) {
+	buckets := make([]types.ActivityBucket, 7)
+	buckets[0] = types.ActivityBucket{KeyboardOnlySeconds: 10, MouseOnlySeconds: 20}
+	buckets[1] = types.ActivityBucket{BothSeconds: 10}
+	total, maximum := activityMetrics(buckets)
+	if total != 40 || maximum != 30 {
+		t.Fatalf("activity metrics = total %d, maximum %d", total, maximum)
+	}
+
+	response := &types.ActivityResponse{
+		Period:      types.ActivityWeekly,
+		TimeStamp:   "2026-08-24 – 2026-08-30",
+		Buckets:     make([]types.ActivityBucket, 7),
+		PeakSeconds: 2 * (2*60*60 + 28*60 + 40),
+	}
+	response.Buckets[0] = types.ActivityBucket{BothSeconds: 2*60*60 + 28*60 + 40}
+	caption := activityCaption(response)
+	if len(caption.Array) != 7 {
+		t.Fatalf("caption parts = %#v", caption.Array)
+	}
+	if caption.Array[0].PlainText != "Week: " || caption.Array[1].RichTextBold.Text.PlainText != "24.08 - 30.08" {
+		t.Fatalf("period caption = %#v", caption.Array[:2])
+	}
+	if caption.Array[2].PlainText != "\nActivity: " || caption.Array[3].RichTextBold.Text.PlainText != "2 hours, 28 minutes, 40 seconds" {
+		t.Fatalf("activity caption = %#v", caption.Array[2:4])
+	}
+	if caption.Array[4].PlainText != "\nEfficiency: " || caption.Array[5].RichTextBold.Text.PlainText != "50%" || caption.Array[6].PlainText != " of record" {
+		t.Fatalf("efficiency caption = %#v", caption.Array[4:])
 	}
 }
 

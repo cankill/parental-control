@@ -211,7 +211,39 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 		resp.BucketSeconds = 5 * 60
 		resp.Buckets = s.readActivityHour(hour)
 	}
+	resp.PeakSeconds = s.maxActivityPeriodSeconds(resp.Period)
 	return resp
+}
+
+// maxActivityPeriodSeconds returns the activity record for the requested
+// granularity across all stored periods (hour, day, or Monday-Sunday week).
+func (s *StatsStorage) maxActivityPeriodSeconds(period types.ActivityPeriod) int {
+	totals := map[string]int{}
+	for _, bucket := range s.localStorage.ListBuckets() {
+		if !strings.HasPrefix(bucket, activityBucketPrefix) {
+			continue
+		}
+		hour := strings.TrimPrefix(bucket, activityBucketPrefix)
+		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
+		if err != nil {
+			continue
+		}
+		key := hour
+		switch period {
+		case types.ActivityDaily:
+			key = t.Format(TruncatedToDay)
+		case types.ActivityWeekly:
+			key = activityWeekStart(t).Format(TruncatedToDay)
+		}
+		totals[key] += sumActivityBuckets(s.readActivityHour(hour)).ActiveSeconds()
+	}
+	maximum := 0
+	for _, total := range totals {
+		if total > maximum {
+			maximum = total
+		}
+	}
+	return maximum
 }
 
 func (s *StatsStorage) readActivityHour(hour string) []types.ActivityBucket {

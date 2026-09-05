@@ -76,6 +76,7 @@ type ActivityResponse struct {
 	Shift         int
 	BucketSeconds int
 	Buckets       []ActivityBucket
+	PeakSeconds   int
 	OlderShift    int
 	NewerShift    int
 	HasOlder      bool
