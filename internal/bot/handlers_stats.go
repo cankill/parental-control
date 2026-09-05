@@ -14,9 +14,9 @@ func (h *handlerRegistry) registerStatsHandlers() {
 	h.command("stats", func(c *updateContext) error {
 		return c.SendRichMessage(renderStatsMenu())
 	})
-	h.callback("hub-hourly", h.hubAction("/hourly", h.sendHourly))
-	h.callback("hub-daily", h.hubAction("/daily", h.sendDaily))
-	h.callback("hub-weekly", h.hubAction("/weekly", h.sendWeekly))
+	h.callback("hub-hourly", h.hubAction(h.sendHourly))
+	h.callback("hub-daily", h.hubAction(h.sendDaily))
+	h.callback("hub-weekly", h.hubAction(h.sendWeekly))
 	h.callback("stat-prev", h.navigateHourly)
 	h.callback("stat-next", h.navigateHourly)
 	h.callback("day-prev", h.navigateDaily)
@@ -28,22 +28,21 @@ func (h *handlerRegistry) registerStatsHandlers() {
 func (h *handlerRegistry) sendHourly(c *updateContext) error {
 	resp, err := h.stats.hourly(0)
 	if err != nil {
-		return c.SendRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
+		return c.RespondRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
 	}
-	if err := c.SendRichMessage(renderStatistics(resp)); err != nil {
-		return err
-	}
+	message := renderStatistics(resp)
 
 	url, _ := browser.FrontmostBrowserURL()
 	if url == "" {
-		return nil
+		return c.RespondRichMessage(message)
 	}
 	sites, err := h.stats.sites(0)
 	if err != nil {
-		return nil
+		return c.RespondRichMessage(message)
 	}
 	sites.ActiveApp = browser.Domain(url)
-	return c.SendRichMessage(renderSites(sites))
+	message.Blocks = append(message.Blocks, renderSites(sites).Blocks...)
+	return c.RespondRichMessage(message)
 }
 
 func (h *handlerRegistry) navigateHourly(c *updateContext) error {
@@ -57,9 +56,9 @@ func (h *handlerRegistry) navigateHourly(c *updateContext) error {
 func (h *handlerRegistry) sendDaily(c *updateContext) error {
 	resp, err := h.stats.daily(0)
 	if err != nil {
-		return c.SendRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
+		return c.RespondRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
 	}
-	return c.SendRichMessage(renderDailyRich(resp))
+	return c.RespondRichMessage(renderDailyRich(resp))
 }
 
 func (h *handlerRegistry) navigateDaily(c *updateContext) error {
@@ -73,9 +72,9 @@ func (h *handlerRegistry) navigateDaily(c *updateContext) error {
 func (h *handlerRegistry) sendWeekly(c *updateContext) error {
 	resp, err := h.stats.weekly(0)
 	if err != nil {
-		return c.SendRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
+		return c.RespondRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
 	}
-	return c.SendRichMessage(renderWeeklyRich(resp))
+	return c.RespondRichMessage(renderWeeklyRich(resp))
 }
 
 func (h *handlerRegistry) navigateWeekly(c *updateContext) error {
@@ -89,13 +88,13 @@ func (h *handlerRegistry) navigateWeekly(c *updateContext) error {
 func (h *handlerRegistry) sendAppInfo(c *updateContext) error {
 	name := strings.TrimSpace(c.Payload())
 	if name == "" {
-		return c.SendRichMessage(renderNotice("Usage", "/info <app name from /stats>"))
+		return c.RespondRichMessage(renderNotice("Usage", "/info <app name from /stats>"))
 	}
 	text, err := h.stats.appInfo(name)
 	if err != nil {
-		return c.SendRichMessage(renderNotice("Application info unavailable", "ParentControl is shutting down."))
+		return c.RespondRichMessage(renderNotice("Application info unavailable", "ParentControl is shutting down."))
 	}
-	return c.SendRichMessage(renderPreformatted("Application info", text))
+	return c.RespondRichMessage(renderPreformatted("Application info", text))
 }
 
 func callbackShift(c *updateContext) int {

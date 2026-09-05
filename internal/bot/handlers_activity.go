@@ -26,7 +26,7 @@ func (h *handlerRegistry) sendActivityMenu(c *updateContext) error {
 
 func (h *handlerRegistry) selectActivityPeriod(period types.ActivityPeriod) handlerFunc {
 	return func(c *updateContext) error {
-		if err := c.EditRichMessage(renderStatus("Activity: " + activityPeriodName(period))); err != nil {
+		if err := c.AnswerCallback("", false); err != nil {
 			return err
 		}
 		return h.sendActivity(c, period, 0)
@@ -36,17 +36,17 @@ func (h *handlerRegistry) selectActivityPeriod(period types.ActivityPeriod) hand
 func (h *handlerRegistry) sendActivity(c *updateContext, period types.ActivityPeriod, shift int) error {
 	if !activity.PreflightAccess() {
 		activity.RequestAccessOnce()
-		return c.SendRichMessage(renderNotice("Input Monitoring required", inputMonitoringHelp))
+		return c.RespondRichMessage(renderNotice("Input Monitoring required", inputMonitoringHelp))
 	}
 	resp, err := h.stats.activity(period, shift)
 	if err != nil {
-		return c.SendRichMessage(renderNotice("Activity unavailable", "ParentControl is shutting down."))
+		return c.RespondRichMessage(renderNotice("Activity unavailable", "ParentControl is shutting down."))
 	}
 	data, err := renderActivityPNG(resp)
 	if err != nil {
-		return c.SendRichMessage(renderNotice("Activity unavailable", "Could not render the activity chart."))
+		return c.RespondRichMessage(renderNotice("Activity unavailable", "Could not render the activity chart."))
 	}
-	return c.SendRichMessage(renderPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
+	return c.RespondRichMessage(renderPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
 }
 
 func (h *handlerRegistry) navigateActivity(c *updateContext) error {

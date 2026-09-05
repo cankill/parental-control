@@ -263,6 +263,47 @@ func TestSendAndEditDailyRichMessage(t *testing.T) {
 	}
 }
 
+func TestRespondRichMessageSendsForCommandAndEditsForCallback(t *testing.T) {
+	var methods []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		methods = append(methods, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9}}`))
+	}))
+	defer server.Close()
+
+	bot, err := tgbot.New("123:test", tgbot.WithSkipGetMe(), tgbot.WithServerURL(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newRichClient(server.URL, bot.Token(), server.Client())
+	message := renderStatus("result")
+
+	command := newUpdateContext(context.Background(), bot, &models.Update{
+		Message: &models.Message{ID: 3, Chat: models.Chat{ID: 42}},
+	}, "", client)
+	if err := command.RespondRichMessage(message); err != nil {
+		t.Fatalf("command response: %v", err)
+	}
+
+	callback := newUpdateContext(context.Background(), bot, &models.Update{
+		CallbackQuery: &models.CallbackQuery{Message: models.MaybeInaccessibleMessage{
+			Type:    models.MaybeInaccessibleMessageTypeMessage,
+			Message: &models.Message{ID: 9, Chat: models.Chat{ID: 42}},
+		}},
+	}, "", client)
+	if err := callback.RespondRichMessage(message); err != nil {
+		t.Fatalf("callback response: %v", err)
+	}
+
+	if len(methods) != 2 || !strings.HasSuffix(methods[0], "/sendRichMessage") || !strings.HasSuffix(methods[1], "/editMessageText") {
+		t.Fatalf("Telegram methods = %v", methods)
+	}
+}
+
 func TestSendAndEditRichPhotoMultipart(t *testing.T) {
 	var methods []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

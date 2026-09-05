@@ -149,11 +149,8 @@ func (h *handlerRegistry) dispatchCallback(ctx context.Context, b *tgbot.Bot, up
 	}
 }
 
-func (h *handlerRegistry) hubAction(label string, action handlerFunc) handlerFunc {
+func (h *handlerRegistry) hubAction(action handlerFunc) handlerFunc {
 	return func(c *updateContext) error {
-		if err := c.EditRichMessage(renderStatus(label)); err != nil {
-			log.Printf("Edit hub message failed: %s", err)
-		}
 		if err := c.AnswerCallback("", false); err != nil {
 			log.Printf("Answer hub callback failed: %s", err)
 		}

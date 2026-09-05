@@ -18,15 +18,15 @@ func (h *handlerRegistry) registerMediaHandlers() {
 			richCallbackButton("Audio", "hub-record"),
 		))
 	})
-	h.callback("hub-photo", h.hubAction("/photo", h.sendPhoto))
-	h.callback("hub-screen", h.hubAction("/screen", h.sendScreen))
-	h.callback("hub-record", h.hubAction("/record", h.sendRecord))
+	h.callback("hub-photo", h.hubAction(h.sendPhoto))
+	h.callback("hub-screen", h.hubAction(h.sendScreen))
+	h.callback("hub-record", h.hubAction(h.sendRecord))
 }
 
 func (h *handlerRegistry) sendScreen(c *updateContext) error {
 	fname, err := media.CaptureScreen()
 	if err != nil {
-		return c.SendRichMessage(renderNotice("Screenshot failed", err.Error()))
+		return c.RespondRichMessage(renderNotice("Screenshot failed", err.Error()))
 	}
 	defer os.Remove(fname)
 	file, err := os.Open(fname)
@@ -34,13 +34,13 @@ func (h *handlerRegistry) sendScreen(c *updateContext) error {
 		return err
 	}
 	defer file.Close()
-	return c.SendRichMessage(renderPhoto(file, "screen.png", "Screenshot"))
+	return c.RespondRichMessage(renderPhoto(file, "screen.png", "Screenshot"))
 }
 
 func (h *handlerRegistry) sendPhoto(c *updateContext) error {
 	fname, err := media.CapturePhoto()
 	if err != nil {
-		return c.SendRichMessage(renderNotice("Photo failed", err.Error()))
+		return c.RespondRichMessage(renderNotice("Photo failed", err.Error()))
 	}
 	defer os.Remove(fname)
 	file, err := os.Open(fname)
@@ -48,13 +48,13 @@ func (h *handlerRegistry) sendPhoto(c *updateContext) error {
 		return err
 	}
 	defer file.Close()
-	return c.SendRichMessage(renderPhoto(file, "camera.jpg", "Camera photo"))
+	return c.RespondRichMessage(renderPhoto(file, "camera.jpg", "Camera photo"))
 }
 
 func (h *handlerRegistry) sendRecord(c *updateContext) error {
 	fname, err := media.RecordAudio(recordSeconds(c))
 	if err != nil {
-		return c.SendRichMessage(renderNotice("Audio recording failed", err.Error()))
+		return c.RespondRichMessage(renderNotice("Audio recording failed", err.Error()))
 	}
 	defer os.Remove(fname)
 	file, err := os.Open(fname)
@@ -62,7 +62,7 @@ func (h *handlerRegistry) sendRecord(c *updateContext) error {
 		return err
 	}
 	defer file.Close()
-	return c.SendRichMessage(renderAudio(file, "recording.m4a", "Audio recording"))
+	return c.RespondRichMessage(renderAudio(file, "recording.m4a", "Audio recording"))
 }
 
 func recordSeconds(c *updateContext) int {

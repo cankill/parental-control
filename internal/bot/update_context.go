@@ -38,6 +38,15 @@ func (c *updateContext) SendRichMessage(message models.InputRichMessage) error {
 	return c.rich.send(c.ctx, chatID, message, 0)
 }
 
+// RespondRichMessage sends a new message for a command and replaces the
+// message containing the pressed button for a callback.
+func (c *updateContext) RespondRichMessage(message models.InputRichMessage) error {
+	if c.update.CallbackQuery != nil {
+		return c.EditRichMessage(message)
+	}
+	return c.SendRichMessage(message)
+}
+
 func (c *updateContext) ReplyRichMessage(message models.InputRichMessage) error {
 	if c.update.Message == nil {
 		return fmt.Errorf("update has no message to reply to")
