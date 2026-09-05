@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"io"
 	"parental-control/internal/lib/types"
 	"strconv"
 	"time"
@@ -8,21 +9,39 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-func renderStatistics(resp *types.AppInfoResponse) (string, *models.InlineKeyboardMarkup) {
-	resp.AppInfos.SortByDurationDesc()
-	text := "```\n" + "  For: " + resp.TimeStamp + "\n\n" + resp.AppInfos.FormatTableMarked(resp.ActiveApp) + "\n```"
-	return text, makeHourKeyboard(resp, "stat-prev", "stat-next")
+func renderStatistics(resp *types.AppInfoResponse) models.InputRichMessage {
+	return renderUsageRich("Hour: "+resp.TimeStamp, resp, "‹ Earlier", "stat-prev", "Later ›", "stat-next")
 }
 
 func renderDailyRich(resp *types.AppInfoResponse) models.InputRichMessage {
+	return renderUsageRich("Day: "+resp.TimeStamp, resp, "‹ Prev day", "day-prev", "Next day ›", "day-next")
+}
+
+func renderWeeklyRich(resp *types.AppInfoResponse) models.InputRichMessage {
+	return renderUsageRich("Week: "+resp.TimeStamp, resp, "‹ Prev week", "week-prev", "Next week ›", "week-next")
+}
+
+func renderSites(resp *types.AppInfoResponse) models.InputRichMessage {
+	return renderUsageRichWithLabel("Sites: "+resp.TimeStamp, "Site", resp, "‹ Earlier", "sites-prev", "Later ›", "sites-next")
+}
+
+func renderUsageRich(title string, resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) models.InputRichMessage {
+	return renderUsageRichWithLabel(title, "Application", resp, previousText, previousID, nextText, nextID)
+}
+
+func renderUsageRichWithLabel(title, identityLabel string, resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) models.InputRichMessage {
 	resp.AppInfos.SortByDurationDesc()
 	rows := [][]models.RichBlockTableCell{
-		{richTableCell("Application", true, "left"), richTableCell("Time spent", true, "right")},
+		{richTableCell(identityLabel, true, "left"), richTableCell("Time spent", true, "right")},
 	}
 	total := time.Duration(0)
 	for _, app := range resp.AppInfos {
+		name := app.Identity
+		if resp.ActiveApp != "" && app.Identity == resp.ActiveApp {
+			name = "● " + name
+		}
 		rows = append(rows, []models.RichBlockTableCell{
-			richTableCell(app.Identity, false, "left"),
+			richTableCell(name, false, "left"),
 			richTableCell(app.Duration.String(), false, "right"),
 		})
 		total += app.Duration
@@ -33,13 +52,7 @@ func renderDailyRich(resp *types.AppInfoResponse) models.InputRichMessage {
 	})
 
 	blocks := []models.InputRichBlock{
-		{
-			Type: models.RichBlockTypeSectionHeading,
-			InputRichBlockSectionHeading: &models.InputRichBlockSectionHeading{
-				Text: richText("Day: " + resp.TimeStamp),
-				Size: 2,
-			},
-		},
+		richHeading(title),
 		{
 			Type: models.RichBlockTypeTable,
 			InputRichBlockTable: &models.InputRichBlockTable{
@@ -47,21 +60,103 @@ func renderDailyRich(resp *types.AppInfoResponse) models.InputRichMessage {
 			},
 		},
 	}
-
-	buttons := makeNavigationRichButtons(resp, "‹ Prev day", "day-prev", "Next day ›", "day-next")
+	buttons := makeNavigationRichButtons(resp, previousText, previousID, nextText, nextID)
 	if len(buttons) > 0 {
-		blocks = append(blocks, models.InputRichBlock{
-			Type: models.RichBlockTypeButtons,
-			InputRichBlockButtons: &models.InputRichBlockButtons{
-				Buttons: buttons, Align: "center",
-			},
-		})
+		blocks = append(blocks, richButtons(buttons...))
 	}
 	return models.InputRichMessage{Blocks: blocks}
 }
 
+func renderMenu(title string, buttons ...models.RichMessageButton) models.InputRichMessage {
+	return models.InputRichMessage{Blocks: []models.InputRichBlock{richHeading(title), richButtons(buttons...)}}
+}
+
+func renderStatsMenu() models.InputRichMessage {
+	return renderMenu("Statistics",
+		richCallbackButton("Hourly", "hub-hourly"),
+		richCallbackButton("Daily", "hub-daily"),
+		richCallbackButton("Weekly", "hub-weekly"),
+	)
+}
+
+func renderActivityMenu() models.InputRichMessage {
+	return renderMenu("Activity",
+		richCallbackButton("Hourly", "activity-hourly"),
+		richCallbackButton("Daily", "activity-daily"),
+		richCallbackButton("Weekly", "activity-weekly"),
+	)
+}
+
+func renderStatus(text string) models.InputRichMessage {
+	return models.InputRichMessage{Blocks: []models.InputRichBlock{richParagraph(text)}}
+}
+
+func renderNotice(title, text string) models.InputRichMessage {
+	blocks := []models.InputRichBlock{richHeading(title)}
+	if text != "" {
+		blocks = append(blocks, richParagraph(text))
+	}
+	return models.InputRichMessage{Blocks: blocks}
+}
+
+func renderPreformatted(title, text string) models.InputRichMessage {
+	return models.InputRichMessage{Blocks: []models.InputRichBlock{
+		richHeading(title),
+		{Type: models.RichBlockTypePreformatted, InputRichBlockPreformatted: &models.InputRichBlockPreformatted{Text: richText(text)}},
+	}}
+}
+
+func renderPhoto(reader io.Reader, filename, caption string, buttons ...models.RichMessageButton) models.InputRichMessage {
+	photo := models.InputMediaPhoto{Media: "attach://" + filename, MediaAttachment: reader}
+	block := models.InputRichBlock{
+		Type:                models.RichBlockTypePhoto,
+		InputRichBlockPhoto: &models.InputRichBlockPhoto{Photo: photo, Caption: richCaption(caption)},
+	}
+	blocks := []models.InputRichBlock{block}
+	if len(buttons) > 0 {
+		blocks = append(blocks, richButtons(buttons...))
+	}
+	return models.InputRichMessage{Blocks: blocks}
+}
+
+func renderAudio(reader io.Reader, filename, caption string) models.InputRichMessage {
+	audio := models.InputMediaAudio{Media: "attach://" + filename, MediaAttachment: reader}
+	return models.InputRichMessage{Blocks: []models.InputRichBlock{{
+		Type:                models.RichBlockTypeAudio,
+		InputRichBlockAudio: &models.InputRichBlockAudio{Audio: audio, Caption: richCaption(caption)},
+	}}}
+}
+
+func richCaption(text string) *models.RichBlockCaption {
+	if text == "" {
+		return nil
+	}
+	return &models.RichBlockCaption{Text: richText(text)}
+}
+
 func richText(text string) models.RichText {
 	return models.RichText{PlainText: text}
+}
+
+func richHeading(text string) models.InputRichBlock {
+	return models.InputRichBlock{
+		Type:                         models.RichBlockTypeSectionHeading,
+		InputRichBlockSectionHeading: &models.InputRichBlockSectionHeading{Text: richText(text), Size: 2},
+	}
+}
+
+func richParagraph(text string) models.InputRichBlock {
+	return models.InputRichBlock{
+		Type:                    models.RichBlockTypeParagraph,
+		InputRichBlockParagraph: &models.InputRichBlockParagraph{Text: richText(text)},
+	}
+}
+
+func richButtons(buttons ...models.RichMessageButton) models.InputRichBlock {
+	return models.InputRichBlock{
+		Type:                  models.RichBlockTypeButtons,
+		InputRichBlockButtons: &models.InputRichBlockButtons{Buttons: buttons, Align: "center"},
+	}
 }
 
 func richTableCell(text string, header bool, align string) models.RichBlockTableCell {
@@ -69,41 +164,17 @@ func richTableCell(text string, header bool, align string) models.RichBlockTable
 	return models.RichBlockTableCell{Text: &value, IsHeader: header, Align: align, Valign: "middle"}
 }
 
+func richCallbackButton(text, action string, payload ...string) models.RichMessageButton {
+	return models.RichMessageButton{Text: richText(text), Style: "primary", CallbackData: encodeCallbackData(action, payload...)}
+}
+
 func makeNavigationRichButtons(resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) []models.RichMessageButton {
 	buttons := make([]models.RichMessageButton, 0, 2)
 	if resp.HasOlder {
-		buttons = append(buttons, models.RichMessageButton{
-			Text: richText(previousText), Style: "primary", CallbackData: encodeCallbackData(previousID, strconv.Itoa(resp.OlderShift)),
-		})
+		buttons = append(buttons, richCallbackButton(previousText, previousID, strconv.Itoa(resp.OlderShift)))
 	}
 	if resp.HasNewer {
-		buttons = append(buttons, models.RichMessageButton{
-			Text: richText(nextText), Style: "primary", CallbackData: encodeCallbackData(nextID, strconv.Itoa(resp.NewerShift)),
-		})
+		buttons = append(buttons, richCallbackButton(nextText, nextID, strconv.Itoa(resp.NewerShift)))
 	}
 	return buttons
-}
-
-func renderSites(resp *types.AppInfoResponse) (string, *models.InlineKeyboardMarkup) {
-	resp.AppInfos.SortByDurationDesc()
-	text := "```\n" + "  Sites for: " + resp.TimeStamp + "\n\n" + resp.AppInfos.FormatTableMarked(resp.ActiveApp) + "\n```"
-	return text, makeHourKeyboard(resp, "sites-prev", "sites-next")
-}
-
-func makeHourKeyboard(resp *types.AppInfoResponse, previous, next string) *models.InlineKeyboardMarkup {
-	return makeNavigationKeyboard(resp, "‹ Earlier", previous, "Later ›", next)
-}
-
-func makeNavigationKeyboard(resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) *models.InlineKeyboardMarkup {
-	buttons := make([]models.InlineKeyboardButton, 0, 2)
-	if resp.HasOlder {
-		buttons = append(buttons, callbackButton(previousText, previousID, strconv.Itoa(resp.OlderShift)))
-	}
-	if resp.HasNewer {
-		buttons = append(buttons, callbackButton(nextText, nextID, strconv.Itoa(resp.NewerShift)))
-	}
-	if len(buttons) == 0 {
-		return nil
-	}
-	return inlineKeyboard(buttons...)
 }

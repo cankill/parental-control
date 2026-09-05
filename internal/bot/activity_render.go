@@ -10,6 +10,7 @@ import (
 	"math"
 	"parental-control/internal/lib/types"
 	"sort"
+	"strings"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/tdewolff/canvas"
@@ -369,23 +370,35 @@ func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 }
 
 func formatActivityDuration(seconds int) string {
-	if seconds < 60*60 {
-		return fmt.Sprintf("%ds", seconds)
+	if seconds < 0 {
+		seconds = 0
 	}
-	if seconds < 24*60*60 {
-		hours := seconds / (60 * 60)
-		minutes := seconds / 60 % 60
-		if minutes == 0 {
-			return fmt.Sprintf("%dh", hours)
+	units := []struct {
+		seconds          int
+		singular, plural string
+	}{
+		{24 * 60 * 60, "day", "days"},
+		{60 * 60, "hour", "hours"},
+		{60, "minute", "minutes"},
+		{1, "second", "seconds"},
+	}
+	parts := make([]string, 0, len(units))
+	for _, unit := range units {
+		value := seconds / unit.seconds
+		seconds %= unit.seconds
+		if value == 0 {
+			continue
 		}
-		return fmt.Sprintf("%dh %dm", hours, minutes)
+		name := unit.plural
+		if value == 1 {
+			name = unit.singular
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", value, name))
 	}
-	days := seconds / (24 * 60 * 60)
-	hours := seconds / (60 * 60) % 24
-	if hours == 0 {
-		return fmt.Sprintf("%dd", days)
+	if len(parts) == 0 {
+		return "0 seconds"
 	}
-	return fmt.Sprintf("%dd %dh", days, hours)
+	return strings.Join(parts, ", ")
 }
 
 func activityCaption(resp *types.ActivityResponse) string {
@@ -397,18 +410,15 @@ func activityCaption(resp *types.ActivityResponse) string {
 		activityPeriodName(resp.Period), resp.TimeStamp, formatActivityDuration(active))
 }
 
-func activityKeyboard(resp *types.ActivityResponse) *models.InlineKeyboardMarkup {
-	buttons := []models.InlineKeyboardButton{}
+func activityButtons(resp *types.ActivityResponse) []models.RichMessageButton {
+	buttons := []models.RichMessageButton{}
 	if resp.HasOlder {
-		buttons = append(buttons, callbackButton("‹ Earlier", "activity-prev", activityNavigationData(resp.Period, resp.OlderShift)))
+		buttons = append(buttons, richCallbackButton("‹ Earlier", "activity-prev", activityNavigationData(resp.Period, resp.OlderShift)))
 	}
 	if resp.HasNewer {
-		buttons = append(buttons, callbackButton("Later ›", "activity-next", activityNavigationData(resp.Period, resp.NewerShift)))
+		buttons = append(buttons, richCallbackButton("Later ›", "activity-next", activityNavigationData(resp.Period, resp.NewerShift)))
 	}
-	if len(buttons) == 0 {
-		return nil
-	}
-	return inlineKeyboard(buttons...)
+	return buttons
 }
 
 func activityNavigationData(period types.ActivityPeriod, shift int) string {

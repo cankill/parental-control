@@ -31,6 +31,14 @@ func (c *statisticsClient) daily(shift int) (*types.AppInfoResponse, error) {
 	return receive(c.ctx, response)
 }
 
+func (c *statisticsClient) weekly(shift int) (*types.AppInfoResponse, error) {
+	response := make(chan *types.AppInfoResponse, 1)
+	if err := c.send(types.WeekRequest{WeekShift: shift, ResponseChan: response}); err != nil {
+		return nil, err
+	}
+	return receive(c.ctx, response)
+}
+
 func (c *statisticsClient) sites(shift int) (*types.AppInfoResponse, error) {
 	response := make(chan *types.AppInfoResponse, 1)
 	if err := c.send(types.DomainRequest{ShiftHours: shift, ResponseChan: response}); err != nil {

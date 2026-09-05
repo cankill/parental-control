@@ -398,6 +398,62 @@ func (s *StatsStorage) NearestDayShift(fromShift int, older bool) (int, bool) {
 	return best, best != -1
 }
 
+// GetStatisticsWeek aggregates application usage for a Monday–Sunday calendar
+// week. weekShift=0 selects the current week, 1 the previous week, and so on.
+func (s *StatsStorage) GetStatisticsWeek(weekShift int) *types.AppInfoResponse {
+	weekStart := activityWeekStart(time.Now()).AddDate(0, 0, -7*weekShift)
+	weekEnd := weekStart.AddDate(0, 0, 6)
+	totals := map[string]time.Duration{}
+	for _, bucket := range s.localStorage.ListBuckets() {
+		t, err := time.ParseInLocation(TruncatedToHour, bucket, time.Local)
+		if err != nil || t.Before(weekStart) || !t.Before(weekEnd.AddDate(0, 0, 1)) {
+			continue
+		}
+		for _, app := range s.GetStatistics(bucket) {
+			totals[app.Identity] += app.Duration
+		}
+	}
+
+	stats := make(types.AppInfos, 0, len(totals))
+	for name, duration := range totals {
+		stats = append(stats, types.AppInfo{Identity: name, Duration: duration})
+	}
+	stats.SortByDurationDesc()
+	return &types.AppInfoResponse{
+		AppInfos:   stats,
+		TimeStamp:  weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay),
+		ShiftHours: weekShift,
+	}
+}
+
+// NearestWeekShift finds the closest week with application data, skipping
+// empty weeks and buckets that only contain excluded applications.
+func (s *StatsStorage) NearestWeekShift(fromShift int, older bool) (int, bool) {
+	now := time.Now()
+	currentWeek := activityWeekStart(now)
+	seen := map[int]bool{}
+	for _, bucket := range s.localStorage.ListBuckets() {
+		t, err := time.ParseInLocation(TruncatedToHour, bucket, time.Local)
+		if err != nil || len(s.GetStatistics(bucket)) == 0 {
+			continue
+		}
+		shift := int((activityDayIndex(currentWeek) - activityDayIndex(activityWeekStart(t))) / 7)
+		if shift >= 0 {
+			seen[shift] = true
+		}
+	}
+	best := -1
+	for shift := range seen {
+		if older && shift > fromShift && (best == -1 || shift < best) {
+			best = shift
+		}
+		if !older && shift < fromShift && shift > best {
+			best = shift
+		}
+	}
+	return best, best != -1
+}
+
 func (s *StatsStorage) DumpTheUsage() {
 	now := time.Now()
 	// for range 5 {

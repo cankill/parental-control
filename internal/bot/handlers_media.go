@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"fmt"
 	"os"
 	"parental-control/internal/media"
 	"strconv"
@@ -13,7 +12,11 @@ func (h *handlerRegistry) registerMediaHandlers() {
 	h.command("photo", h.sendPhoto)
 	h.command("record", h.sendRecord)
 	h.command("media", func(c *updateContext) error {
-		return c.SendText("Media:", "", h.keyboards.media)
+		return c.SendRichMessage(renderMenu("Media",
+			richCallbackButton("Photo", "hub-photo"),
+			richCallbackButton("Screen", "hub-screen"),
+			richCallbackButton("Record", "hub-record"),
+		))
 	})
 	h.callback("hub-photo", h.hubAction("/photo", h.sendPhoto))
 	h.callback("hub-screen", h.hubAction("/screen", h.sendScreen))
@@ -23,28 +26,43 @@ func (h *handlerRegistry) registerMediaHandlers() {
 func (h *handlerRegistry) sendScreen(c *updateContext) error {
 	fname, err := media.CaptureScreen()
 	if err != nil {
-		return c.SendText(err.Error(), "", nil)
+		return c.SendRichMessage(renderNotice("Screenshot failed", err.Error()))
 	}
 	defer os.Remove(fname)
-	return c.SendPhotoFile(fname)
+	file, err := os.Open(fname)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return c.SendRichMessage(renderPhoto(file, "screen.png", "Screenshot"))
 }
 
 func (h *handlerRegistry) sendPhoto(c *updateContext) error {
 	fname, err := media.CapturePhoto()
 	if err != nil {
-		return c.SendText(fmt.Sprintf("Photo error: %s", err), "", nil)
+		return c.SendRichMessage(renderNotice("Photo failed", err.Error()))
 	}
 	defer os.Remove(fname)
-	return c.SendPhotoFile(fname)
+	file, err := os.Open(fname)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return c.SendRichMessage(renderPhoto(file, "camera.jpg", "Camera photo"))
 }
 
 func (h *handlerRegistry) sendRecord(c *updateContext) error {
 	fname, err := media.RecordAudio(recordSeconds(c))
 	if err != nil {
-		return c.SendText(fmt.Sprintf("Record error: %s", err), "", nil)
+		return c.SendRichMessage(renderNotice("Audio recording failed", err.Error()))
 	}
 	defer os.Remove(fname)
-	return c.SendAudioFile(fname)
+	file, err := os.Open(fname)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return c.SendRichMessage(renderAudio(file, "recording.m4a", "Audio recording"))
 }
 
 func recordSeconds(c *updateContext) int {

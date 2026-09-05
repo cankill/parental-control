@@ -1,17 +1,15 @@
 package bot
 
-import (
-	"fmt"
-	"parental-control/internal/browser"
-
-	"github.com/go-telegram/bot/models"
-)
+import "parental-control/internal/browser"
 
 func (h *handlerRegistry) registerWebHandlers() {
 	h.command("url", h.sendURL)
 	h.command("sites", h.sendSites)
 	h.command("web", func(c *updateContext) error {
-		return c.SendText("Web:", "", h.keyboards.web)
+		return c.SendRichMessage(renderMenu("Web",
+			richCallbackButton("Current URL", "hub-url"),
+			richCallbackButton("Sites", "hub-sites"),
+		))
 	})
 	h.callback("hub-url", h.hubAction("/url", h.sendURL))
 	h.callback("hub-sites", h.hubAction("/sites", h.sendSites))
@@ -22,21 +20,20 @@ func (h *handlerRegistry) registerWebHandlers() {
 func (h *handlerRegistry) sendURL(c *updateContext) error {
 	url, err := browser.FrontmostBrowserURL()
 	if err != nil {
-		return c.SendText(fmt.Sprintf("No browser URL: %s", err), "", nil)
+		return c.SendRichMessage(renderNotice("Browser URL unavailable", err.Error()))
 	}
 	if url == "" {
-		return c.SendText("No active browser tab", "", nil)
+		return c.SendRichMessage(renderNotice("Browser", "No active browser tab."))
 	}
-	return c.SendText(url, "", nil)
+	return c.SendRichMessage(renderNotice("Current browser URL", url))
 }
 
 func (h *handlerRegistry) sendSites(c *updateContext) error {
 	resp, err := h.stats.sites(0)
 	if err != nil {
-		return c.SendText("Statistics unavailable (shutting down)", "", nil)
+		return c.SendRichMessage(renderNotice("Site statistics unavailable", "ParentControl is shutting down."))
 	}
-	text, kb := renderSites(resp)
-	return c.SendText(text, models.ParseModeMarkdown, kb)
+	return c.SendRichMessage(renderSites(resp))
 }
 
 func (h *handlerRegistry) navigateSites(c *updateContext) error {
@@ -44,6 +41,5 @@ func (h *handlerRegistry) navigateSites(c *updateContext) error {
 	if err != nil {
 		return err
 	}
-	text, kb := renderSites(resp)
-	return c.EditText(text, models.ParseModeMarkdown, kb)
+	return c.EditRichMessage(renderSites(resp))
 }

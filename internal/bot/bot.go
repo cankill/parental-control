@@ -20,8 +20,8 @@ type handlerFunc func(*updateContext) error
 type handlerRegistry struct {
 	bot       *tgbot.Bot
 	stats     *statisticsClient
-	keyboards *keyboards
 	youtube   *youtubeTimer
+	rich      *richClient
 	commands  map[string]handlerFunc
 	callbacks map[string]handlerFunc
 }
@@ -56,8 +56,8 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	h := &handlerRegistry{
 		bot:       b,
 		stats:     newStatisticsClient(ctx, requests),
-		keyboards: newKeyboards(),
 		youtube:   newYoutubeTimer(ctx),
+		rich:      newRichClient(telegramAPIURL, env.BotToken, nil),
 		commands:  make(map[string]handlerFunc),
 		callbacks: make(map[string]handlerFunc),
 	}
@@ -74,9 +74,10 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 
 func botCommands() []models.BotCommand {
 	return []models.BotCommand{
-		{Command: "stats", Description: "App usage: Hourly | Daily"},
+		{Command: "stats", Description: "App usage: Hourly | Daily | Weekly"},
 		{Command: "hourly", Description: "App usage this hour"},
 		{Command: "daily", Description: "App usage today"},
+		{Command: "weekly", Description: "App usage this week"},
 		{Command: "activity", Description: "Activity: Hourly | Daily | Weekly"},
 		{Command: "info", Description: "App info by name: /info <name>"},
 		{Command: "web", Description: "Browser: URL | Sites"},
@@ -125,14 +126,14 @@ func (h *handlerRegistry) dispatchCommand(ctx context.Context, b *tgbot.Bot, upd
 	if !ok {
 		return
 	}
-	c := newUpdateContext(ctx, b, update, payload)
+	c := newUpdateContext(ctx, b, update, payload, h.rich)
 	if err := handler(c); err != nil {
 		log.Printf("Telegram command /%s failed: %s", name, err)
 	}
 }
 
 func (h *handlerRegistry) dispatchCallback(ctx context.Context, b *tgbot.Bot, update *models.Update) {
-	c := newUpdateContext(ctx, b, update, "")
+	c := newUpdateContext(ctx, b, update, "", h.rich)
 	defer c.ensureCallbackAnswered()
 	action, payload, ok := parseCallbackData(update.CallbackQuery.Data)
 	if !ok {
@@ -150,7 +151,7 @@ func (h *handlerRegistry) dispatchCallback(ctx context.Context, b *tgbot.Bot, up
 
 func (h *handlerRegistry) hubAction(label string, action handlerFunc) handlerFunc {
 	return func(c *updateContext) error {
-		if err := c.EditText(label, "", nil); err != nil {
+		if err := c.EditRichMessage(renderStatus(label)); err != nil {
 			log.Printf("Edit hub message failed: %s", err)
 		}
 		if err := c.AnswerCallback("", false); err != nil {

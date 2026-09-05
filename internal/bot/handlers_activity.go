@@ -13,7 +13,6 @@ const inputMonitoringAlert = "Input Monitoring permission is required. Enable it
 
 func (h *handlerRegistry) registerActivityHandlers() {
 	h.command("activity", h.sendActivityMenu)
-	h.callback("hub-activity", h.hubAction("/activity", h.sendActivityMenu))
 	h.callback("activity-hourly", h.selectActivityPeriod(types.ActivityHourly))
 	h.callback("activity-daily", h.selectActivityPeriod(types.ActivityDaily))
 	h.callback("activity-weekly", h.selectActivityPeriod(types.ActivityWeekly))
@@ -22,12 +21,12 @@ func (h *handlerRegistry) registerActivityHandlers() {
 }
 
 func (h *handlerRegistry) sendActivityMenu(c *updateContext) error {
-	return c.SendText("Activity:", "", h.keyboards.activityMenu)
+	return c.SendRichMessage(renderActivityMenu())
 }
 
 func (h *handlerRegistry) selectActivityPeriod(period types.ActivityPeriod) handlerFunc {
 	return func(c *updateContext) error {
-		if err := c.EditText("Activity: "+activityPeriodName(period), "", nil); err != nil {
+		if err := c.EditRichMessage(renderStatus("Activity: " + activityPeriodName(period))); err != nil {
 			return err
 		}
 		return h.sendActivity(c, period, 0)
@@ -37,17 +36,17 @@ func (h *handlerRegistry) selectActivityPeriod(period types.ActivityPeriod) hand
 func (h *handlerRegistry) sendActivity(c *updateContext, period types.ActivityPeriod, shift int) error {
 	if !activity.PreflightAccess() {
 		activity.RequestAccessOnce()
-		return c.SendText(inputMonitoringHelp, "", nil)
+		return c.SendRichMessage(renderNotice("Input Monitoring required", inputMonitoringHelp))
 	}
 	resp, err := h.stats.activity(period, shift)
 	if err != nil {
-		return c.SendText("Activity unavailable (shutting down)", "", nil)
+		return c.SendRichMessage(renderNotice("Activity unavailable", "ParentControl is shutting down."))
 	}
 	data, err := renderActivityPNG(resp)
 	if err != nil {
-		return c.SendText("Could not render activity chart", "", nil)
+		return c.SendRichMessage(renderNotice("Activity unavailable", "Could not render the activity chart."))
 	}
-	return c.SendPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityKeyboard(resp))
+	return c.SendRichMessage(renderPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
 }
 
 func (h *handlerRegistry) navigateActivity(c *updateContext) error {
@@ -66,7 +65,7 @@ func (h *handlerRegistry) navigateActivity(c *updateContext) error {
 	if err != nil {
 		return c.AnswerCallback("Activity unavailable", false)
 	}
-	return c.EditPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityKeyboard(resp))
+	return c.EditRichMessage(renderPhoto(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
 }
 
 func parseActivityTarget(data string) (types.ActivityPeriod, int, bool) {

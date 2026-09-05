@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"parental-control/internal/lib/types"
@@ -112,6 +113,48 @@ func TestRenderDailyRichWithoutNavigation(t *testing.T) {
 	}
 }
 
+func TestRenderWeeklyRichAndStatsMenu(t *testing.T) {
+	message := renderWeeklyRich(&types.AppInfoResponse{
+		TimeStamp: "2026-08-31 – 2026-09-06",
+		HasOlder:  true, OlderShift: 2,
+	})
+	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Week: 2026-08-31 – 2026-09-06" {
+		t.Fatalf("weekly heading = %q", got)
+	}
+	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
+	if len(buttons) != 1 || buttons[0].CallbackData != "\fweek-prev|2" {
+		t.Fatalf("weekly buttons = %#v", buttons)
+	}
+
+	menu := renderStatsMenu()
+	menuButtons := menu.Blocks[1].InputRichBlockButtons.Buttons
+	if len(menuButtons) != 3 {
+		t.Fatalf("stats buttons = %d, want hourly, daily, weekly", len(menuButtons))
+	}
+	want := []string{"\fhub-hourly", "\fhub-daily", "\fhub-weekly"}
+	for i, button := range menuButtons {
+		if button.CallbackData != want[i] {
+			t.Fatalf("stats button %d = %q, want %q", i, button.CallbackData, want[i])
+		}
+	}
+}
+
+func TestFormatActivityDuration(t *testing.T) {
+	tests := map[int]string{
+		0:     "0 seconds",
+		1:     "1 second",
+		60:    "1 minute",
+		1000:  "16 minutes, 40 seconds",
+		3661:  "1 hour, 1 minute, 1 second",
+		90061: "1 day, 1 hour, 1 minute, 1 second",
+	}
+	for seconds, want := range tests {
+		if got := formatActivityDuration(seconds); got != want {
+			t.Errorf("formatActivityDuration(%d) = %q, want %q", seconds, got, want)
+		}
+	}
+}
+
 func TestEnsureCallbackAnswered(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +181,7 @@ func TestEnsureCallbackAnswered(t *testing.T) {
 
 func TestSendAndEditDailyRichMessage(t *testing.T) {
 	var methods []string
+	var replyMessageID int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Errorf("parse form: %v", err)
@@ -150,6 +194,13 @@ func TestSendAndEditDailyRichMessage(t *testing.T) {
 		if len(rich.Blocks) != 2 {
 			t.Errorf("rich blocks = %d, want 2", len(rich.Blocks))
 		}
+		if raw := r.FormValue("reply_parameters"); raw != "" {
+			var reply models.ReplyParameters
+			if err := json.Unmarshal([]byte(raw), &reply); err != nil {
+				t.Errorf("decode reply_parameters: %v", err)
+			}
+			replyMessageID = reply.MessageID
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9,"date":1,"chat":{"id":42,"type":"private"}}}`))
 	}))
@@ -160,20 +211,68 @@ func TestSendAndEditDailyRichMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	message := renderDailyRich(&types.AppInfoResponse{TimeStamp: "2026-09-02"})
+	rich := newRichClient(server.URL, b.Token(), server.Client())
 	command := newUpdateContext(context.Background(), b, &models.Update{
 		Message: &models.Message{Chat: models.Chat{ID: 42}},
-	}, "")
+	}, "", rich)
 	if err := command.SendRichMessage(message); err != nil {
 		t.Fatalf("send rich message: %v", err)
+	}
+	if err := rich.send(context.Background(), 42, message, 17); err != nil {
+		t.Fatalf("reply with rich message: %v", err)
 	}
 	callback := newUpdateContext(context.Background(), b, &models.Update{
 		CallbackQuery: &models.CallbackQuery{Message: models.MaybeInaccessibleMessage{
 			Type:    models.MaybeInaccessibleMessageTypeMessage,
 			Message: &models.Message{ID: 9, Chat: models.Chat{ID: 42}},
 		}},
-	}, "")
+	}, "", rich)
 	if err := callback.EditRichMessage(message); err != nil {
 		t.Fatalf("edit rich message: %v", err)
+	}
+	if replyMessageID != 17 {
+		t.Fatalf("reply message ID = %d, want 17", replyMessageID)
+	}
+	if len(methods) != 3 || !strings.HasSuffix(methods[0], "/sendRichMessage") || !strings.HasSuffix(methods[1], "/sendRichMessage") || !strings.HasSuffix(methods[2], "/editMessageText") {
+		t.Fatalf("Telegram methods = %v", methods)
+	}
+}
+
+func TestSendAndEditRichPhotoMultipart(t *testing.T) {
+	var methods []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		methods = append(methods, r.URL.Path)
+		file, _, err := r.FormFile("activity.png")
+		if err != nil {
+			t.Fatalf("activity attachment: %v", err)
+		}
+		data, err := io.ReadAll(file)
+		_ = file.Close()
+		if err != nil || string(data) != "png-data" {
+			t.Fatalf("activity attachment = %q, %v", data, err)
+		}
+		var message models.InputRichMessage
+		if err := json.Unmarshal([]byte(r.FormValue("rich_message")), &message); err != nil {
+			t.Fatalf("decode rich message: %v", err)
+		}
+		photo := message.Blocks[0].InputRichBlockPhoto
+		if photo == nil || photo.Photo.Media != "attach://activity.png" || photo.Caption.Text.PlainText != "Activity" {
+			t.Fatalf("photo block = %#v", photo)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9}}`))
+	}))
+	defer server.Close()
+
+	client := newRichClient(server.URL, "123:test", server.Client())
+	if err := client.send(context.Background(), 42, renderPhoto(strings.NewReader("png-data"), "activity.png", "Activity"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.edit(context.Background(), 42, 9, renderPhoto(strings.NewReader("png-data"), "activity.png", "Activity")); err != nil {
+		t.Fatal(err)
 	}
 	if len(methods) != 2 || !strings.HasSuffix(methods[0], "/sendRichMessage") || !strings.HasSuffix(methods[1], "/editMessageText") {
 		t.Fatalf("Telegram methods = %v", methods)

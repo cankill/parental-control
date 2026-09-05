@@ -12,6 +12,7 @@ const (
 	Command AppCommandType = iota
 	Event
 	DayCommand
+	WeekCommand
 	DomainEvent
 	DomainCommand
 	AppInfoCommand
@@ -94,6 +95,17 @@ type DayRequest struct {
 
 func (dc DayRequest) Type() AppCommandType {
 	return DayCommand
+}
+
+// WeekRequest запрашивает агрегированную статистику за календарную неделю
+// (понедельник–воскресенье), отстоящую на WeekShift недель назад.
+type WeekRequest struct {
+	WeekShift    int
+	ResponseChan chan<- *AppInfoResponse
+}
+
+func (wr WeekRequest) Type() AppCommandType {
+	return WeekCommand
 }
 
 type NewAppEvent struct {

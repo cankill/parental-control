@@ -94,6 +94,14 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				resp.NewerShift, resp.HasNewer = storage.NearestDayShift(request.DayShift, false)
 				request.ResponseChan <- resp
 
+			case types.WeekCommand:
+				request := command.(types.WeekRequest)
+				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
+				resp := storage.GetStatisticsWeek(request.WeekShift)
+				resp.OlderShift, resp.HasOlder = storage.NearestWeekShift(request.WeekShift, true)
+				resp.NewerShift, resp.HasNewer = storage.NearestWeekShift(request.WeekShift, false)
+				request.ResponseChan <- resp
+
 			case types.DomainCommand:
 				request := command.(types.DomainRequest)
 				resp := storage.GetDomainStatistics(request.ShiftHours)

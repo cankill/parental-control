@@ -224,3 +224,34 @@ func TestGetStatisticsDayAndNav(t *testing.T) {
 		t.Fatalf("older day from 2: expected none")
 	}
 }
+
+func TestGetStatisticsWeekAndNav(t *testing.T) {
+	st := newTestStorage(t)
+	now := time.Now()
+	currentWeek := activityWeekStart(now)
+	previousWeek := currentWeek.AddDate(0, 0, -7)
+
+	st.localStorage.SaveValue(currentWeek.Format(TruncatedToDay)+"T10", "com.google.Chrome", "60000")
+	st.localStorage.SaveValue(currentWeek.AddDate(0, 0, 2).Format(TruncatedToDay)+"T14", "com.google.Chrome", "30000")
+	st.localStorage.SaveValue(currentWeek.AddDate(0, 0, 3).Format(TruncatedToDay)+"T11", "com.apple.Safari", "45000")
+	st.localStorage.SaveValue(previousWeek.Format(TruncatedToDay)+"T09", "com.apple.Safari", "120000")
+	st.localStorage.SaveValue(previousWeek.AddDate(0, 0, -7).Format(TruncatedToDay)+"T09", "com.apple.loginwindow", "3600000")
+
+	resp := st.GetStatisticsWeek(0)
+	wantTimestamp := currentWeek.Format(TruncatedToDay) + " – " + currentWeek.AddDate(0, 0, 6).Format(TruncatedToDay)
+	if resp.TimeStamp != wantTimestamp {
+		t.Fatalf("week timestamp = %q, want %q", resp.TimeStamp, wantTimestamp)
+	}
+	if len(resp.AppInfos) != 2 || resp.AppInfos[0].Identity != "Chrome" || resp.AppInfos[0].Duration != 90*time.Second {
+		t.Fatalf("current week aggregation = %+v", resp.AppInfos)
+	}
+	if shift, ok := st.NearestWeekShift(0, true); !ok || shift != 1 {
+		t.Fatalf("older week from 0 = (%d, %v), want (1, true)", shift, ok)
+	}
+	if shift, ok := st.NearestWeekShift(1, false); !ok || shift != 0 {
+		t.Fatalf("newer week from 1 = (%d, %v), want (0, true)", shift, ok)
+	}
+	if _, ok := st.NearestWeekShift(1, true); ok {
+		t.Fatal("loginwindow-only week must not be available for navigation")
+	}
+}
