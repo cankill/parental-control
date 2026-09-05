@@ -14,6 +14,27 @@ func renderStatistics(resp *types.AppInfoResponse) models.InputRichMessage {
 	return renderUsageRich("Hour: "+formatReportTimestamp(resp.TimeStamp), resp, "‹", "stat-prev", "›", "stat-next")
 }
 
+func renderHourlyRich(apps, sites *types.AppInfoResponse) models.InputRichMessage {
+	blocks := []models.InputRichBlock{richHeading("Hour: " + formatReportTimestamp(apps.TimeStamp))}
+	appTable, hasApps := renderUsageTable("App", apps)
+	if hasApps {
+		blocks = append(blocks, appTable)
+	}
+	siteTable, hasSites := renderUsageTable("Site", sites)
+	if hasSites {
+		blocks = append(blocks, siteTable)
+	}
+	if !hasApps && !hasSites {
+		blocks = append(blocks, richParagraph("No Statistics"))
+	}
+
+	navigation := combinedHourlyNavigation(apps, sites)
+	if buttons := makeNavigationRichButtons(navigation, "‹", "stat-prev", "›", "stat-next"); len(buttons) > 0 {
+		blocks = append(blocks, richButtons(buttons...))
+	}
+	return models.InputRichMessage{Blocks: blocks}
+}
+
 func renderDailyRich(resp *types.AppInfoResponse) models.InputRichMessage {
 	return renderUsageRich("Day: "+formatReportTimestamp(resp.TimeStamp), resp, "‹", "day-prev", "›", "day-next")
 }
@@ -31,6 +52,24 @@ func renderUsageRich(title string, resp *types.AppInfoResponse, previousText, pr
 }
 
 func renderUsageRichWithLabel(title, identityLabel string, resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) models.InputRichMessage {
+	blocks := []models.InputRichBlock{richHeading(title)}
+	table, hasStatistics := renderUsageTable(identityLabel, resp)
+	if hasStatistics {
+		blocks = append(blocks, table)
+	} else {
+		blocks = append(blocks, richParagraph("No Statistics"))
+	}
+	buttons := makeNavigationRichButtons(resp, previousText, previousID, nextText, nextID)
+	if len(buttons) > 0 {
+		blocks = append(blocks, richButtons(buttons...))
+	}
+	return models.InputRichMessage{Blocks: blocks}
+}
+
+func renderUsageTable(identityLabel string, resp *types.AppInfoResponse) (models.InputRichBlock, bool) {
+	if resp == nil {
+		return models.InputRichBlock{}, false
+	}
 	statistics := make(types.AppInfos, 0, len(resp.AppInfos))
 	for _, app := range resp.AppInfos {
 		if app.Duration > 0 {
@@ -38,14 +77,8 @@ func renderUsageRichWithLabel(title, identityLabel string, resp *types.AppInfoRe
 		}
 	}
 	statistics.SortByDurationDesc()
-	blocks := []models.InputRichBlock{richHeading(title)}
 	if len(statistics) == 0 {
-		blocks = append(blocks, richParagraph("No Statistics"))
-		buttons := makeNavigationRichButtons(resp, previousText, previousID, nextText, nextID)
-		if len(buttons) > 0 {
-			blocks = append(blocks, richButtons(buttons...))
-		}
-		return models.InputRichMessage{Blocks: blocks}
+		return models.InputRichBlock{}, false
 	}
 
 	rows := [][]models.RichBlockTableCell{
@@ -68,19 +101,30 @@ func renderUsageRichWithLabel(title, identityLabel string, resp *types.AppInfoRe
 		richTableCell(formatCompactDuration(total), true, "right"),
 	})
 
-	blocks = append(blocks,
-		models.InputRichBlock{
-			Type: models.RichBlockTypeTable,
-			InputRichBlockTable: &models.InputRichBlockTable{
-				Cells: rows, IsCompact: true,
-			},
+	return models.InputRichBlock{
+		Type: models.RichBlockTypeTable,
+		InputRichBlockTable: &models.InputRichBlockTable{
+			Cells: rows, IsCompact: true,
 		},
-	)
-	buttons := makeNavigationRichButtons(resp, previousText, previousID, nextText, nextID)
-	if len(buttons) > 0 {
-		blocks = append(blocks, richButtons(buttons...))
+	}, true
+}
+
+func combinedHourlyNavigation(responses ...*types.AppInfoResponse) *types.AppInfoResponse {
+	result := &types.AppInfoResponse{}
+	for _, resp := range responses {
+		if resp == nil {
+			continue
+		}
+		if resp.HasOlder && (!result.HasOlder || resp.OlderShift < result.OlderShift) {
+			result.HasOlder = true
+			result.OlderShift = resp.OlderShift
+		}
+		if resp.HasNewer && (!result.HasNewer || resp.NewerShift > result.NewerShift) {
+			result.HasNewer = true
+			result.NewerShift = resp.NewerShift
+		}
 	}
-	return models.InputRichMessage{Blocks: blocks}
+	return result
 }
 
 func renderMenu(title string, buttons ...models.RichMessageButton) models.InputRichMessage {

@@ -30,27 +30,34 @@ func (h *handlerRegistry) sendHourly(c *updateContext) error {
 	if err != nil {
 		return c.RespondRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
 	}
-	message := renderStatistics(resp)
-
-	url, _ := browser.FrontmostBrowserURL()
-	if url == "" {
-		return c.RespondRichMessage(message)
-	}
 	sites, err := h.stats.sites(0)
 	if err != nil {
-		return c.RespondRichMessage(message)
+		return c.RespondRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
 	}
-	sites.ActiveApp = browser.Domain(url)
-	message.Blocks = append(message.Blocks, renderSites(sites).Blocks...)
-	return c.RespondRichMessage(message)
+	url, _ := browser.FrontmostBrowserURL()
+	if url != "" {
+		sites.ActiveApp = browser.Domain(url)
+	}
+	return c.RespondRichMessage(renderHourlyRich(resp, sites))
 }
 
 func (h *handlerRegistry) navigateHourly(c *updateContext) error {
-	resp, err := h.stats.hourly(callbackShift(c))
+	shift := callbackShift(c)
+	resp, err := h.stats.hourly(shift)
 	if err != nil {
 		return err
 	}
-	return c.EditRichMessage(renderStatistics(resp))
+	sites, err := h.stats.sites(shift)
+	if err != nil {
+		return err
+	}
+	if shift == 0 {
+		url, _ := browser.FrontmostBrowserURL()
+		if url != "" {
+			sites.ActiveApp = browser.Domain(url)
+		}
+	}
+	return c.EditRichMessage(renderHourlyRich(resp, sites))
 }
 
 func (h *handlerRegistry) sendDaily(c *updateContext) error {

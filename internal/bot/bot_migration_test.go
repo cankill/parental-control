@@ -120,6 +120,75 @@ func TestRenderDailyRich(t *testing.T) {
 	}
 }
 
+func TestRenderHourlyRichCombinesAppsSitesAndNavigation(t *testing.T) {
+	apps := &types.AppInfoResponse{
+		TimeStamp: "2026-09-05T14",
+		AppInfos: types.AppInfos{
+			{Identity: "Terminal", Duration: 5 * time.Minute},
+		},
+		HasOlder: true, OlderShift: 3,
+		HasNewer: true, NewerShift: 0,
+	}
+	sites := &types.AppInfoResponse{
+		TimeStamp: "2026-09-05T14",
+		AppInfos: types.AppInfos{
+			{Identity: "example.com", Duration: 2 * time.Minute},
+		},
+		HasOlder: true, OlderShift: 2,
+	}
+
+	message := renderHourlyRich(apps, sites)
+	if len(message.Blocks) != 4 {
+		t.Fatalf("rich blocks = %d, want heading, two tables, and one navigation row", len(message.Blocks))
+	}
+	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Hour: 05.09 14:00" {
+		t.Fatalf("heading = %q", got)
+	}
+	if got := message.Blocks[1].InputRichBlockTable.Cells[0][0].Text.PlainText; got != "App" {
+		t.Fatalf("first table identity = %q, want App", got)
+	}
+	if got := message.Blocks[2].InputRichBlockTable.Cells[0][0].Text.PlainText; got != "Site" {
+		t.Fatalf("second table identity = %q, want Site", got)
+	}
+	buttons := message.Blocks[3].InputRichBlockButtons.Buttons
+	if len(buttons) != 2 {
+		t.Fatalf("navigation buttons = %#v", buttons)
+	}
+	if buttons[0].CallbackData != "\fstat-prev|2" || buttons[1].CallbackData != "\fstat-next|0" {
+		t.Fatalf("combined navigation = %#v", buttons)
+	}
+}
+
+func TestRenderHourlyRichEmptyUsesSiteTimeline(t *testing.T) {
+	apps := &types.AppInfoResponse{TimeStamp: "2026-09-05T14"}
+	sites := &types.AppInfoResponse{TimeStamp: "2026-09-05T14", HasOlder: true, OlderShift: 4}
+	message := renderHourlyRich(apps, sites)
+	if len(message.Blocks) != 3 {
+		t.Fatalf("rich blocks = %d, want heading, empty state, and navigation", len(message.Blocks))
+	}
+	if got := message.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "No Statistics" {
+		t.Fatalf("empty state = %q", got)
+	}
+	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
+	if len(buttons) != 1 || buttons[0].CallbackData != "\fstat-prev|4" {
+		t.Fatalf("combined empty navigation = %#v", buttons)
+	}
+}
+
+func TestRenderHourlyRichOmitsEmptySitesTable(t *testing.T) {
+	apps := &types.AppInfoResponse{
+		TimeStamp: "2026-09-05T14",
+		AppInfos:  types.AppInfos{{Identity: "Chrome", Duration: time.Minute}},
+	}
+	message := renderHourlyRich(apps, &types.AppInfoResponse{TimeStamp: apps.TimeStamp})
+	if len(message.Blocks) != 2 {
+		t.Fatalf("rich blocks = %d, want heading and applications table", len(message.Blocks))
+	}
+	if got := message.Blocks[1].InputRichBlockTable.Cells[0][0].Text.PlainText; got != "App" {
+		t.Fatalf("only table identity = %q, want App", got)
+	}
+}
+
 func TestRenderDailyRichWithoutNavigation(t *testing.T) {
 	message := renderDailyRich(&types.AppInfoResponse{TimeStamp: "2026-09-02"})
 	if len(message.Blocks) != 2 {
