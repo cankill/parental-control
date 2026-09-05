@@ -9,8 +9,8 @@ import (
 func (h *handlerRegistry) registerYoutubeHandlers() {
 	h.command("youtube", func(c *updateContext) error {
 		return c.ReplyRichMessage(renderMenu("YouTube access",
-			richCallbackButton("30 minutes", "30-minutes"),
-			richCallbackButton("1 hour", "1-hour"),
+			richCallbackButton("30m", "30-minutes"),
+			richCallbackButton("1h", "1-hour"),
 			richCallbackButton("Block", "block"),
 			richCallbackButton("Unblock", "un-block"),
 		))

@@ -7,7 +7,7 @@ func (h *handlerRegistry) registerWebHandlers() {
 	h.command("sites", h.sendSites)
 	h.command("web", func(c *updateContext) error {
 		return c.SendRichMessage(renderMenu("Web",
-			richCallbackButton("Current URL", "hub-url"),
+			richCallbackButton("URL", "hub-url"),
 			richCallbackButton("Sites", "hub-sites"),
 		))
 	})

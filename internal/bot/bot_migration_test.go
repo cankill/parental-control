@@ -77,9 +77,22 @@ func TestRenderDailyRich(t *testing.T) {
 	if len(message.Blocks) != 3 {
 		t.Fatalf("rich blocks = %d, want 3", len(message.Blocks))
 	}
+	heading := message.Blocks[0].InputRichBlockSectionHeading
+	if heading == nil || heading.Size != 6 {
+		t.Fatalf("heading = %#v, want smallest size 6", heading)
+	}
 	table := message.Blocks[1].InputRichBlockTable
 	if table == nil || len(table.Cells) != 4 {
 		t.Fatalf("table rows = %#v, want header + 2 apps + total", table)
+	}
+	if !table.IsCompact || table.IsBordered || table.IsStriped {
+		t.Fatalf("table density = compact:%v bordered:%v striped:%v", table.IsCompact, table.IsBordered, table.IsStriped)
+	}
+	if got := table.Cells[0][0].Text.PlainText; got != "App" {
+		t.Fatalf("identity header = %q, want App", got)
+	}
+	if got := table.Cells[0][1].Text.PlainText; got != "Time" {
+		t.Fatalf("duration header = %q, want Time", got)
 	}
 	if got := table.Cells[1][0].Text.PlainText; got != "Terminal" {
 		t.Fatalf("first app = %q, want duration-sorted Terminal", got)
@@ -96,6 +109,11 @@ func TestRenderDailyRich(t *testing.T) {
 	}
 	if got := buttons.Buttons[1].CallbackData; got != "\fday-next|0" {
 		t.Fatalf("next callback = %q", got)
+	}
+	for _, button := range buttons.Buttons {
+		if button.Style != "link" {
+			t.Fatalf("button style = %q, want link", button.Style)
+		}
 	}
 	if _, err := json.Marshal(message); err != nil {
 		t.Fatalf("marshal rich message: %v", err)
@@ -118,12 +136,15 @@ func TestRenderWeeklyRichAndStatsMenu(t *testing.T) {
 		TimeStamp: "2026-08-31 – 2026-09-06",
 		HasOlder:  true, OlderShift: 2,
 	})
-	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Week: 2026-08-31 – 2026-09-06" {
+	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Week 2026-08-31 – 2026-09-06" {
 		t.Fatalf("weekly heading = %q", got)
 	}
 	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
 	if len(buttons) != 1 || buttons[0].CallbackData != "\fweek-prev|2" {
 		t.Fatalf("weekly buttons = %#v", buttons)
+	}
+	if buttons[0].Text.PlainText != "‹" || buttons[0].Style != "link" {
+		t.Fatalf("weekly navigation button = %#v", buttons[0])
 	}
 
 	menu := renderStatsMenu()
@@ -132,9 +153,13 @@ func TestRenderWeeklyRichAndStatsMenu(t *testing.T) {
 		t.Fatalf("stats buttons = %d, want hourly, daily, weekly", len(menuButtons))
 	}
 	want := []string{"\fhub-hourly", "\fhub-daily", "\fhub-weekly"}
+	wantText := []string{"Hour", "Day", "Week"}
 	for i, button := range menuButtons {
 		if button.CallbackData != want[i] {
 			t.Fatalf("stats button %d = %q, want %q", i, button.CallbackData, want[i])
+		}
+		if button.Text.PlainText != wantText[i] || button.Style != "link" {
+			t.Fatalf("stats button %d = %#v", i, button)
 		}
 	}
 }

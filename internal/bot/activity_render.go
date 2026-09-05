@@ -413,10 +413,10 @@ func activityCaption(resp *types.ActivityResponse) string {
 func activityButtons(resp *types.ActivityResponse) []models.RichMessageButton {
 	buttons := []models.RichMessageButton{}
 	if resp.HasOlder {
-		buttons = append(buttons, richCallbackButton("‹ Earlier", "activity-prev", activityNavigationData(resp.Period, resp.OlderShift)))
+		buttons = append(buttons, richCallbackButton("‹", "activity-prev", activityNavigationData(resp.Period, resp.OlderShift)))
 	}
 	if resp.HasNewer {
-		buttons = append(buttons, richCallbackButton("Later ›", "activity-next", activityNavigationData(resp.Period, resp.NewerShift)))
+		buttons = append(buttons, richCallbackButton("›", "activity-next", activityNavigationData(resp.Period, resp.NewerShift)))
 	}
 	return buttons
 }

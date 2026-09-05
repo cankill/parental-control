@@ -15,7 +15,7 @@ func (h *handlerRegistry) registerMediaHandlers() {
 		return c.SendRichMessage(renderMenu("Media",
 			richCallbackButton("Photo", "hub-photo"),
 			richCallbackButton("Screen", "hub-screen"),
-			richCallbackButton("Record", "hub-record"),
+			richCallbackButton("Audio", "hub-record"),
 		))
 	})
 	h.callback("hub-photo", h.hubAction("/photo", h.sendPhoto))

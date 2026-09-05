@@ -10,29 +10,29 @@ import (
 )
 
 func renderStatistics(resp *types.AppInfoResponse) models.InputRichMessage {
-	return renderUsageRich("Hour: "+resp.TimeStamp, resp, "‹ Earlier", "stat-prev", "Later ›", "stat-next")
+	return renderUsageRich("Hour "+resp.TimeStamp, resp, "‹", "stat-prev", "›", "stat-next")
 }
 
 func renderDailyRich(resp *types.AppInfoResponse) models.InputRichMessage {
-	return renderUsageRich("Day: "+resp.TimeStamp, resp, "‹ Prev day", "day-prev", "Next day ›", "day-next")
+	return renderUsageRich("Day "+resp.TimeStamp, resp, "‹", "day-prev", "›", "day-next")
 }
 
 func renderWeeklyRich(resp *types.AppInfoResponse) models.InputRichMessage {
-	return renderUsageRich("Week: "+resp.TimeStamp, resp, "‹ Prev week", "week-prev", "Next week ›", "week-next")
+	return renderUsageRich("Week "+resp.TimeStamp, resp, "‹", "week-prev", "›", "week-next")
 }
 
 func renderSites(resp *types.AppInfoResponse) models.InputRichMessage {
-	return renderUsageRichWithLabel("Sites: "+resp.TimeStamp, "Site", resp, "‹ Earlier", "sites-prev", "Later ›", "sites-next")
+	return renderUsageRichWithLabel("Sites "+resp.TimeStamp, "Site", resp, "‹", "sites-prev", "›", "sites-next")
 }
 
 func renderUsageRich(title string, resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) models.InputRichMessage {
-	return renderUsageRichWithLabel(title, "Application", resp, previousText, previousID, nextText, nextID)
+	return renderUsageRichWithLabel(title, "App", resp, previousText, previousID, nextText, nextID)
 }
 
 func renderUsageRichWithLabel(title, identityLabel string, resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) models.InputRichMessage {
 	resp.AppInfos.SortByDurationDesc()
 	rows := [][]models.RichBlockTableCell{
-		{richTableCell(identityLabel, true, "left"), richTableCell("Time spent", true, "right")},
+		{richTableCell(identityLabel, true, "left"), richTableCell("Time", true, "right")},
 	}
 	total := time.Duration(0)
 	for _, app := range resp.AppInfos {
@@ -56,7 +56,7 @@ func renderUsageRichWithLabel(title, identityLabel string, resp *types.AppInfoRe
 		{
 			Type: models.RichBlockTypeTable,
 			InputRichBlockTable: &models.InputRichBlockTable{
-				Cells: rows, IsBordered: true, IsStriped: true, IsCompact: true,
+				Cells: rows, IsCompact: true,
 			},
 		},
 	}
@@ -73,17 +73,17 @@ func renderMenu(title string, buttons ...models.RichMessageButton) models.InputR
 
 func renderStatsMenu() models.InputRichMessage {
 	return renderMenu("Statistics",
-		richCallbackButton("Hourly", "hub-hourly"),
-		richCallbackButton("Daily", "hub-daily"),
-		richCallbackButton("Weekly", "hub-weekly"),
+		richCallbackButton("Hour", "hub-hourly"),
+		richCallbackButton("Day", "hub-daily"),
+		richCallbackButton("Week", "hub-weekly"),
 	)
 }
 
 func renderActivityMenu() models.InputRichMessage {
 	return renderMenu("Activity",
-		richCallbackButton("Hourly", "activity-hourly"),
-		richCallbackButton("Daily", "activity-daily"),
-		richCallbackButton("Weekly", "activity-weekly"),
+		richCallbackButton("Hour", "activity-hourly"),
+		richCallbackButton("Day", "activity-daily"),
+		richCallbackButton("Week", "activity-weekly"),
 	)
 }
 
@@ -141,7 +141,7 @@ func richText(text string) models.RichText {
 func richHeading(text string) models.InputRichBlock {
 	return models.InputRichBlock{
 		Type:                         models.RichBlockTypeSectionHeading,
-		InputRichBlockSectionHeading: &models.InputRichBlockSectionHeading{Text: richText(text), Size: 2},
+		InputRichBlockSectionHeading: &models.InputRichBlockSectionHeading{Text: richText(text), Size: 6},
 	}
 }
 
@@ -165,7 +165,7 @@ func richTableCell(text string, header bool, align string) models.RichBlockTable
 }
 
 func richCallbackButton(text, action string, payload ...string) models.RichMessageButton {
-	return models.RichMessageButton{Text: richText(text), Style: "primary", CallbackData: encodeCallbackData(action, payload...)}
+	return models.RichMessageButton{Text: richText(text), Style: "link", CallbackData: encodeCallbackData(action, payload...)}
 }
 
 func makeNavigationRichButtons(resp *types.AppInfoResponse, previousText, previousID, nextText, nextID string) []models.RichMessageButton {
