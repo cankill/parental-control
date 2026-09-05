@@ -15,7 +15,19 @@ func renderStatistics(resp *types.AppInfoResponse) models.InputRichMessage {
 }
 
 func renderHourlyRich(apps, sites *types.AppInfoResponse) models.InputRichMessage {
-	blocks := []models.InputRichBlock{richHeading("Hour: " + formatReportTimestamp(apps.TimeStamp))}
+	return renderStatisticsWithSites("Hour", apps, sites, "stat-prev", "stat-next")
+}
+
+func renderDailyWithSites(apps, sites *types.AppInfoResponse) models.InputRichMessage {
+	return renderStatisticsWithSites("Day", apps, sites, "day-prev", "day-next")
+}
+
+func renderWeeklyWithSites(apps, sites *types.AppInfoResponse) models.InputRichMessage {
+	return renderStatisticsWithSites("Week", apps, sites, "week-prev", "week-next")
+}
+
+func renderStatisticsWithSites(periodLabel string, apps, sites *types.AppInfoResponse, previousID, nextID string) models.InputRichMessage {
+	blocks := []models.InputRichBlock{richHeading(periodLabel + ": " + formatReportTimestamp(apps.TimeStamp))}
 	appTable, hasApps := renderUsageTable("App", apps)
 	if hasApps {
 		blocks = append(blocks, appTable)
@@ -28,8 +40,8 @@ func renderHourlyRich(apps, sites *types.AppInfoResponse) models.InputRichMessag
 		blocks = append(blocks, richParagraph("No Statistics"))
 	}
 
-	navigation := combinedHourlyNavigation(apps, sites)
-	if buttons := makeNavigationRichButtons(navigation, "‹", "stat-prev", "›", "stat-next"); len(buttons) > 0 {
+	navigation := combinedNavigation(apps, sites)
+	if buttons := makeNavigationRichButtons(navigation, "‹", previousID, "›", nextID); len(buttons) > 0 {
 		blocks = append(blocks, richButtons(buttons...))
 	}
 	return models.InputRichMessage{Blocks: blocks}
@@ -109,7 +121,7 @@ func renderUsageTable(identityLabel string, resp *types.AppInfoResponse) (models
 	}, true
 }
 
-func combinedHourlyNavigation(responses ...*types.AppInfoResponse) *types.AppInfoResponse {
+func combinedNavigation(responses ...*types.AppInfoResponse) *types.AppInfoResponse {
 	result := &types.AppInfoResponse{}
 	for _, resp := range responses {
 		if resp == nil {

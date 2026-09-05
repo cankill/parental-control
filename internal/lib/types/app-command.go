@@ -130,6 +130,7 @@ func (dt DomainTick) Type() AppCommandType {
 
 // DomainRequest запрашивает статистику доменов за час ShiftHours назад.
 type DomainRequest struct {
+	Period       ActivityPeriod
 	ShiftHours   int
 	ResponseChan chan<- *AppInfoResponse
 }

@@ -65,15 +65,24 @@ func (h *handlerRegistry) sendDaily(c *updateContext) error {
 	if err != nil {
 		return c.RespondRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
 	}
-	return c.RespondRichMessage(renderDailyRich(resp))
+	sites, err := h.stats.sitesDaily(0)
+	if err != nil {
+		return c.RespondRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
+	}
+	return c.RespondRichMessage(renderDailyWithSites(resp, sites))
 }
 
 func (h *handlerRegistry) navigateDaily(c *updateContext) error {
-	resp, err := h.stats.daily(callbackShift(c))
+	shift := callbackShift(c)
+	resp, err := h.stats.daily(shift)
 	if err != nil {
 		return err
 	}
-	return c.EditRichMessage(renderDailyRich(resp))
+	sites, err := h.stats.sitesDaily(shift)
+	if err != nil {
+		return err
+	}
+	return c.EditRichMessage(renderDailyWithSites(resp, sites))
 }
 
 func (h *handlerRegistry) sendWeekly(c *updateContext) error {
@@ -81,15 +90,24 @@ func (h *handlerRegistry) sendWeekly(c *updateContext) error {
 	if err != nil {
 		return c.RespondRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
 	}
-	return c.RespondRichMessage(renderWeeklyRich(resp))
+	sites, err := h.stats.sitesWeekly(0)
+	if err != nil {
+		return c.RespondRichMessage(renderNotice("Statistics unavailable", "ParentControl is shutting down."))
+	}
+	return c.RespondRichMessage(renderWeeklyWithSites(resp, sites))
 }
 
 func (h *handlerRegistry) navigateWeekly(c *updateContext) error {
-	resp, err := h.stats.weekly(callbackShift(c))
+	shift := callbackShift(c)
+	resp, err := h.stats.weekly(shift)
 	if err != nil {
 		return err
 	}
-	return c.EditRichMessage(renderWeeklyRich(resp))
+	sites, err := h.stats.sitesWeekly(shift)
+	if err != nil {
+		return err
+	}
+	return c.EditRichMessage(renderWeeklyWithSites(resp, sites))
 }
 
 func (h *handlerRegistry) sendAppInfo(c *updateContext) error {

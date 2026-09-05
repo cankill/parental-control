@@ -40,8 +40,20 @@ func (c *statisticsClient) weekly(shift int) (*types.AppInfoResponse, error) {
 }
 
 func (c *statisticsClient) sites(shift int) (*types.AppInfoResponse, error) {
+	return c.sitesForPeriod(types.ActivityHourly, shift)
+}
+
+func (c *statisticsClient) sitesDaily(shift int) (*types.AppInfoResponse, error) {
+	return c.sitesForPeriod(types.ActivityDaily, shift)
+}
+
+func (c *statisticsClient) sitesWeekly(shift int) (*types.AppInfoResponse, error) {
+	return c.sitesForPeriod(types.ActivityWeekly, shift)
+}
+
+func (c *statisticsClient) sitesForPeriod(period types.ActivityPeriod, shift int) (*types.AppInfoResponse, error) {
 	response := make(chan *types.AppInfoResponse, 1)
-	if err := c.send(types.DomainRequest{ShiftHours: shift, ResponseChan: response}); err != nil {
+	if err := c.send(types.DomainRequest{Period: period, ShiftHours: shift, ResponseChan: response}); err != nil {
 		return nil, err
 	}
 	return receive(c.ctx, response)

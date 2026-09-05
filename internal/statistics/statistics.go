@@ -104,9 +104,21 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 
 			case types.DomainCommand:
 				request := command.(types.DomainRequest)
-				resp := storage.GetDomainStatistics(request.ShiftHours)
-				resp.OlderShift, resp.HasOlder = storage.NearestDomainShift(request.ShiftHours, true)
-				resp.NewerShift, resp.HasNewer = storage.NearestDomainShift(request.ShiftHours, false)
+				var resp *types.AppInfoResponse
+				switch request.Period {
+				case types.ActivityDaily:
+					resp = storage.GetDomainStatisticsDay(request.ShiftHours)
+					resp.OlderShift, resp.HasOlder = storage.NearestDomainDayShift(request.ShiftHours, true)
+					resp.NewerShift, resp.HasNewer = storage.NearestDomainDayShift(request.ShiftHours, false)
+				case types.ActivityWeekly:
+					resp = storage.GetDomainStatisticsWeek(request.ShiftHours)
+					resp.OlderShift, resp.HasOlder = storage.NearestDomainWeekShift(request.ShiftHours, true)
+					resp.NewerShift, resp.HasNewer = storage.NearestDomainWeekShift(request.ShiftHours, false)
+				default:
+					resp = storage.GetDomainStatistics(request.ShiftHours)
+					resp.OlderShift, resp.HasOlder = storage.NearestDomainShift(request.ShiftHours, true)
+					resp.NewerShift, resp.HasNewer = storage.NearestDomainShift(request.ShiftHours, false)
+				}
 				request.ResponseChan <- resp
 
 			case types.DomainEvent:

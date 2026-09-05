@@ -106,6 +106,53 @@ func (s *StatsStorage) GetDomainStatistics(shiftHours int) *types.AppInfoRespons
 	return &types.AppInfoResponse{AppInfos: stats, TimeStamp: hour, ShiftHours: shiftHours}
 }
 
+// GetDomainStatisticsDay aggregates browser-domain usage for the same calendar
+// day boundaries used by the application statistics report.
+func (s *StatsStorage) GetDomainStatisticsDay(dayShift int) *types.AppInfoResponse {
+	day := time.Now().AddDate(0, 0, -dayShift).Format(TruncatedToDay)
+	totals := map[string]time.Duration{}
+	for _, bucket := range s.localStorage.ListBuckets() {
+		if !strings.HasPrefix(bucket, domainBucketPrefix+day+"T") {
+			continue
+		}
+		for _, site := range mapDomainsToAppInfos(s.localStorage.GetValues(bucket)) {
+			totals[site.Identity] += site.Duration
+		}
+	}
+	return domainStatisticsResponse(totals, day, dayShift)
+}
+
+// GetDomainStatisticsWeek aggregates browser-domain usage for the same
+// Monday-Sunday boundaries used by the application statistics report.
+func (s *StatsStorage) GetDomainStatisticsWeek(weekShift int) *types.AppInfoResponse {
+	weekStart := activityWeekStart(time.Now()).AddDate(0, 0, -7*weekShift)
+	weekEnd := weekStart.AddDate(0, 0, 6)
+	totals := map[string]time.Duration{}
+	for _, bucket := range s.localStorage.ListBuckets() {
+		if !strings.HasPrefix(bucket, domainBucketPrefix) {
+			continue
+		}
+		t, err := time.ParseInLocation(TruncatedToHour, strings.TrimPrefix(bucket, domainBucketPrefix), time.Local)
+		if err != nil || t.Before(weekStart) || !t.Before(weekEnd.AddDate(0, 0, 1)) {
+			continue
+		}
+		for _, site := range mapDomainsToAppInfos(s.localStorage.GetValues(bucket)) {
+			totals[site.Identity] += site.Duration
+		}
+	}
+	timestamp := weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay)
+	return domainStatisticsResponse(totals, timestamp, weekShift)
+}
+
+func domainStatisticsResponse(totals map[string]time.Duration, timestamp string, shift int) *types.AppInfoResponse {
+	stats := make(types.AppInfos, 0, len(totals))
+	for domain, duration := range totals {
+		stats = append(stats, types.AppInfo{Identity: domain, Duration: duration})
+	}
+	stats.SortByDurationDesc()
+	return &types.AppInfoResponse{AppInfos: stats, TimeStamp: timestamp, ShiftHours: shift}
+}
+
 // mapDomainsToAppInfos как mapToAppInfos, но домен — это уже готовое имя (без
 // дробления по точкам, иначе youtube.com превратилось бы в "Com").
 func mapDomainsToAppInfos(values map[string]string) types.AppInfos {
@@ -151,6 +198,63 @@ func (s *StatsStorage) NearestShift(fromShift int, older bool) (int, bool) {
 // NearestDomainShift — как NearestShift, но по часовым bucket'ам доменов (dom/).
 func (s *StatsStorage) NearestDomainShift(fromShift int, older bool) (int, bool) {
 	return s.nearestHourShift(domainBucketPrefix, fromShift, older)
+}
+
+func (s *StatsStorage) NearestDomainDayShift(fromShift int, older bool) (int, bool) {
+	haveDay := map[string]bool{}
+	for _, bucket := range s.localStorage.ListBuckets() {
+		if !strings.HasPrefix(bucket, domainBucketPrefix) || len(mapDomainsToAppInfos(s.localStorage.GetValues(bucket))) == 0 {
+			continue
+		}
+		hour := strings.TrimPrefix(bucket, domainBucketPrefix)
+		if _, err := time.ParseInLocation(TruncatedToHour, hour, time.Local); err != nil {
+			continue
+		}
+		haveDay[hour[:len(TruncatedToDay)]] = true
+	}
+	now := time.Now()
+	best := -1
+	for shift := 0; shift <= 370; shift++ {
+		if !haveDay[now.AddDate(0, 0, -shift).Format(TruncatedToDay)] {
+			continue
+		}
+		if older && shift > fromShift && (best == -1 || shift < best) {
+			best = shift
+		}
+		if !older && shift < fromShift && shift > best {
+			best = shift
+		}
+	}
+	return best, best != -1
+}
+
+func (s *StatsStorage) NearestDomainWeekShift(fromShift int, older bool) (int, bool) {
+	currentWeek := activityWeekStart(time.Now())
+	seen := map[int]bool{}
+	for _, bucket := range s.localStorage.ListBuckets() {
+		if !strings.HasPrefix(bucket, domainBucketPrefix) || len(mapDomainsToAppInfos(s.localStorage.GetValues(bucket))) == 0 {
+			continue
+		}
+		hour := strings.TrimPrefix(bucket, domainBucketPrefix)
+		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
+		if err != nil {
+			continue
+		}
+		shift := int((activityDayIndex(currentWeek) - activityDayIndex(activityWeekStart(t))) / 7)
+		if shift >= 0 {
+			seen[shift] = true
+		}
+	}
+	best := -1
+	for shift := range seen {
+		if older && shift > fromShift && (best == -1 || shift < best) {
+			best = shift
+		}
+		if !older && shift < fromShift && shift > best {
+			best = shift
+		}
+	}
+	return best, best != -1
 }
 
 // AddActivity stores one active second in its local five-minute bucket.

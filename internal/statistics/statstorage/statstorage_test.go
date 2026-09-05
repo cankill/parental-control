@@ -204,6 +204,43 @@ func TestNearestDomainShiftSkipsNewTabOnlyBuckets(t *testing.T) {
 	}
 }
 
+func TestDomainDailyAndWeeklyStatisticsAndNavigation(t *testing.T) {
+	now := time.Now()
+	today := now.Format(TruncatedToDay)
+	threeDaysAgo := now.AddDate(0, 0, -3).Format(TruncatedToDay)
+	dailyStorage := newTestStorage(t)
+	dailyStorage.localStorage.SaveValue(domainBucketPrefix+today+"T09", "example.com", "60000")
+	dailyStorage.localStorage.SaveValue(domainBucketPrefix+today+"T14", "example.com", "30000")
+	dailyStorage.localStorage.SaveValue(domainBucketPrefix+today+"T14", "newtab", "3600000")
+	dailyStorage.localStorage.SaveValue(domainBucketPrefix+threeDaysAgo+"T10", "docs.example.com", "45000")
+
+	daily := dailyStorage.GetDomainStatisticsDay(0)
+	if len(daily.AppInfos) != 1 || daily.AppInfos[0].Identity != "example.com" || daily.AppInfos[0].Duration != 90*time.Second {
+		t.Fatalf("daily sites = %+v, want example.com for 90s", daily.AppInfos)
+	}
+	if shift, ok := dailyStorage.NearestDomainDayShift(0, true); !ok || shift != 3 {
+		t.Fatalf("older site day = (%d,%v), want (3,true)", shift, ok)
+	}
+
+	weeklyStorage := newTestStorage(t)
+	previousWeek := activityWeekStart(now).AddDate(0, 0, -7)
+	twoWeeksAgo := activityWeekStart(now).AddDate(0, 0, -14)
+	weeklyStorage.localStorage.SaveValue(domainBucketPrefix+today+"T09", "current.example.com", "60000")
+	weeklyStorage.localStorage.SaveValue(domainBucketPrefix+previousWeek.Format(TruncatedToDay)+"T11", "previous.example.com", "120000")
+	weeklyStorage.localStorage.SaveValue(domainBucketPrefix+twoWeeksAgo.Format(TruncatedToDay)+"T11", "newtab", "3600000")
+
+	weekly := weeklyStorage.GetDomainStatisticsWeek(1)
+	if len(weekly.AppInfos) != 1 || weekly.AppInfos[0].Identity != "previous.example.com" || weekly.AppInfos[0].Duration != 2*time.Minute {
+		t.Fatalf("weekly sites = %+v, want previous.example.com for 2m", weekly.AppInfos)
+	}
+	if shift, ok := weeklyStorage.NearestDomainWeekShift(0, true); !ok || shift != 1 {
+		t.Fatalf("older site week = (%d,%v), want (1,true)", shift, ok)
+	}
+	if _, ok := weeklyStorage.NearestDomainWeekShift(1, true); ok {
+		t.Fatal("newtab-only week must not be available for site navigation")
+	}
+}
+
 // NearestShift должен перепрыгивать пропущенные часы к ближайшему непустому bucket'у.
 func TestNearestShiftSkipsGaps(t *testing.T) {
 	st := newTestStorage(t)

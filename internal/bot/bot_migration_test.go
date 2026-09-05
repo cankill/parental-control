@@ -189,6 +189,46 @@ func TestRenderHourlyRichOmitsEmptySitesTable(t *testing.T) {
 	}
 }
 
+func TestRenderDailyAndWeeklyWithSitesUseSharedPeriodNavigation(t *testing.T) {
+	dailyApps := &types.AppInfoResponse{
+		TimeStamp: "2026-09-05",
+		AppInfos:  types.AppInfos{{Identity: "Terminal", Duration: time.Minute}},
+		HasOlder:  true, OlderShift: 3,
+	}
+	dailySites := &types.AppInfoResponse{
+		TimeStamp: "2026-09-05",
+		AppInfos:  types.AppInfos{{Identity: "example.com", Duration: time.Minute}},
+		HasOlder:  true, OlderShift: 2,
+	}
+	daily := renderDailyWithSites(dailyApps, dailySites)
+	if got := daily.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Day: 05.09" {
+		t.Fatalf("daily heading = %q", got)
+	}
+	dailyButtons := daily.Blocks[len(daily.Blocks)-1].InputRichBlockButtons.Buttons
+	if len(dailyButtons) != 1 || dailyButtons[0].CallbackData != "\fday-prev|2" {
+		t.Fatalf("daily navigation = %#v", dailyButtons)
+	}
+
+	weeklyApps := &types.AppInfoResponse{
+		TimeStamp: "2026-08-31 – 2026-09-06",
+		AppInfos:  dailyApps.AppInfos,
+		HasNewer:  true, NewerShift: 1,
+	}
+	weeklySites := &types.AppInfoResponse{
+		TimeStamp: "2026-08-31 – 2026-09-06",
+		AppInfos:  dailySites.AppInfos,
+		HasNewer:  true, NewerShift: 0,
+	}
+	weekly := renderWeeklyWithSites(weeklyApps, weeklySites)
+	if got := weekly.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Week: 31.08 - 06.09" {
+		t.Fatalf("weekly heading = %q", got)
+	}
+	weeklyButtons := weekly.Blocks[len(weekly.Blocks)-1].InputRichBlockButtons.Buttons
+	if len(weeklyButtons) != 1 || weeklyButtons[0].CallbackData != "\fweek-next|1" {
+		t.Fatalf("weekly navigation = %#v", weeklyButtons)
+	}
+}
+
 func TestRenderDailyRichWithoutNavigation(t *testing.T) {
 	message := renderDailyRich(&types.AppInfoResponse{TimeStamp: "2026-09-02"})
 	if len(message.Blocks) != 2 {
