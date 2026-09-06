@@ -203,6 +203,17 @@ func renderAudio(reader io.Reader, filename, caption string) models.InputRichMes
 	}}}
 }
 
+func renderVideo(reader io.Reader, filename, caption string) models.InputRichMessage {
+	video := models.InputMediaVideo{
+		Media: "attach://" + filename, MediaAttachment: reader,
+		Duration: 5, SupportsStreaming: true,
+	}
+	return models.InputRichMessage{Blocks: []models.InputRichBlock{{
+		Type:                models.RichBlockTypeVideo,
+		InputRichBlockVideo: &models.InputRichBlockVideo{Video: video, Caption: richCaption(caption)},
+	}}}
+}
+
 func richCaption(text string) *models.RichBlockCaption {
 	if text == "" {
 		return nil

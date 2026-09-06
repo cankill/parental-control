@@ -494,3 +494,18 @@ func TestSendAndEditRichPhotoMultipart(t *testing.T) {
 		t.Fatalf("Telegram methods = %v", methods)
 	}
 }
+
+func TestRenderVideoAttachment(t *testing.T) {
+	message := renderVideo(strings.NewReader("mp4-data"), "camera.mp4", "Camera · 5 seconds")
+	if len(message.Blocks) != 1 || message.Blocks[0].InputRichBlockVideo == nil {
+		t.Fatalf("video message = %#v", message)
+	}
+	video := message.Blocks[0].InputRichBlockVideo
+	if video.Video.Media != "attach://camera.mp4" || video.Video.Duration != 5 || !video.Video.SupportsStreaming {
+		t.Fatalf("video block = %#v", video)
+	}
+	attachments := richAttachments(message)
+	if len(attachments) != 1 || attachments[0].name != "camera.mp4" {
+		t.Fatalf("video attachments = %#v", attachments)
+	}
+}

@@ -1,5 +1,5 @@
-// Package media снимает фото с камеры и записывает звук с микрофона через ffmpeg
-// (avfoundation). Используется командами /photo и /record. Требует TCC-разрешений
+// Package media снимает видео с камеры и записывает звук с микрофона через ffmpeg
+// (avfoundation). Используется командами /video и /record. Требует TCC-разрешений
 // Camera/Microphone (выдаются диалогом один раз) — см. entitlements в деплое.
 package media
 
@@ -95,9 +95,11 @@ func cameraIndex(ff string) string {
 	return "0"
 }
 
-// CapturePhoto снимает один кадр с камеры и возвращает путь к JPEG. Вызывающий
-// обязан удалить файл после отправки.
-func CapturePhoto() (string, error) {
+const cameraVideoSeconds = 5
+
+// CaptureVideo records a short silent camera clip and returns its temporary
+// MP4 path. The caller must remove the file after sending it.
+func CaptureVideo() (string, error) {
 	ff, err := ffmpegPath()
 	if err != nil {
 		return "", err
@@ -105,40 +107,44 @@ func CapturePhoto() (string, error) {
 	if err := os.MkdirAll(outputDir, 0700); err != nil {
 		return "", err
 	}
-	fname := filepath.Join(outputDir, fmt.Sprintf("photo-%d.jpg", time.Now().UnixNano()))
+	fname := filepath.Join(outputDir, fmt.Sprintf("video-%d.mp4", time.Now().UnixNano()))
 	dev := cameraIndex(ff)
 
-	shoot := func() ([]byte, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	record := func() ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), (cameraVideoSeconds+15)*time.Second)
 		defer cancel()
-		// -i <dev> — индекс камеры (определён cameraIndex). -update 1 обязателен для
-		// одиночного JPEG через image2-муксер, иначе ffmpeg ругается/ждёт паттерн
-		// имени. НЕ навязываем -video_size/-pixel_format: камера отдаёт нативный
-		// режим (uyvy422), жёсткий формат ломает захват при Continuity Camera.
-		cmd := exec.CommandContext(ctx, ff,
-			"-y", "-f", "avfoundation", "-framerate", "30", "-i", dev,
-			"-frames:v", "1", "-update", "1", "-q:v", "5", fname)
+		cmd := exec.CommandContext(ctx, ff, videoCaptureArgs(dev, fname)...)
 		return cmd.CombinedOutput()
 	}
 
 	// Камера на macOS эксклюзивна: если её держит Zoom/Teams/видеозвонок, ffmpeg
 	// возвращает "Input/output error". Пробуем несколько раз — камера могла
-	// освободиться. Микрофон, в отличие от камеры, шарится, поэтому /record такого
-	// не требует.
+	// освободиться.
 	var out []byte
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
 			time.Sleep(2 * time.Second)
 		}
-		if out, err = shoot(); err == nil {
+		if out, err = record(); err == nil {
 			return fname, nil
 		}
 	}
+	_ = os.Remove(fname)
 
 	if strings.Contains(string(out), "Input/output error") {
 		return "", fmt.Errorf("camera busy — close apps using it (Zoom/Teams/browser call) and retry")
 	}
-	return "", fmt.Errorf("ffmpeg photo failed: %v: %s", err, tail(out))
+	return "", fmt.Errorf("ffmpeg video failed: %v: %s", err, tail(out))
+}
+
+func videoCaptureArgs(device, destination string) []string {
+	return []string{
+		"-y", "-f", "avfoundation", "-framerate", "30", "-i", device,
+		"-t", fmt.Sprintf("%d", cameraVideoSeconds), "-an",
+		"-vf", "scale=1280:-2:force_original_aspect_ratio=decrease", "-r", "15",
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+		"-pix_fmt", "yuv420p", "-movflags", "+faststart", destination,
+	}
 }
 
 // RecordAudio записывает seconds секунд звука с микрофона по умолчанию
