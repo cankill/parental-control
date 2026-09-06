@@ -14,12 +14,13 @@ import (
 
 const slowStatisticsQueryThreshold = 50 * time.Millisecond
 
-func logStatisticsQuery(kind string, shift int, started time.Time) {
+func logStatisticsQuery(kind string, shift int, started time.Time, cache statstorage.CacheMetrics) {
 	elapsed := time.Since(started)
 	if elapsed < slowStatisticsQueryThreshold {
 		return
 	}
-	log.Printf("Slow statistics query: kind=%s shift=%d duration=%s", kind, shift, elapsed.Round(time.Millisecond))
+	log.Printf("Slow statistics query: kind=%s shift=%d duration=%s cache_hits=%d cache_misses=%d cache_entries=%d",
+		kind, shift, elapsed.Round(time.Millisecond), cache.Hits, cache.Misses, cache.Entries)
 }
 
 func activityPeriodName(period types.ActivityPeriod) string {
@@ -107,7 +108,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				if request.ShiftHours == 0 && statstorage.ShouldTrackApplication(activeApplication) {
 					resp.ActiveApp = statstorage.DisplayName(activeApplication)
 				}
-				logStatisticsQuery("apps-hourly", request.ShiftHours, started)
+				logStatisticsQuery("apps-hourly", request.ShiftHours, started, storage.CacheMetrics())
 				request.ResponseChan <- resp
 
 			case types.DayCommand:
@@ -117,7 +118,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				resp := storage.GetStatisticsDay(request.DayShift)
 				resp.OlderShift, resp.HasOlder = storage.NearestDayShift(request.DayShift, true)
 				resp.NewerShift, resp.HasNewer = storage.NearestDayShift(request.DayShift, false)
-				logStatisticsQuery("apps-daily", request.DayShift, started)
+				logStatisticsQuery("apps-daily", request.DayShift, started, storage.CacheMetrics())
 				request.ResponseChan <- resp
 
 			case types.WeekCommand:
@@ -127,7 +128,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				resp := storage.GetStatisticsWeek(request.WeekShift)
 				resp.OlderShift, resp.HasOlder = storage.NearestWeekShift(request.WeekShift, true)
 				resp.NewerShift, resp.HasNewer = storage.NearestWeekShift(request.WeekShift, false)
-				logStatisticsQuery("apps-weekly", request.WeekShift, started)
+				logStatisticsQuery("apps-weekly", request.WeekShift, started, storage.CacheMetrics())
 				request.ResponseChan <- resp
 
 			case types.DomainCommand:
@@ -148,7 +149,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 					resp.OlderShift, resp.HasOlder = storage.NearestDomainShift(request.ShiftHours, true)
 					resp.NewerShift, resp.HasNewer = storage.NearestDomainShift(request.ShiftHours, false)
 				}
-				logStatisticsQuery("sites-"+activityPeriodName(request.Period), request.ShiftHours, started)
+				logStatisticsQuery("sites-"+activityPeriodName(request.Period), request.ShiftHours, started, storage.CacheMetrics())
 				request.ResponseChan <- resp
 
 			case types.DomainEvent:
@@ -168,7 +169,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				resp := storage.GetActivity(request.Period, request.Shift)
 				resp.OlderShift, resp.HasOlder = storage.NearestActivityShift(request.Period, request.Shift, true)
 				resp.NewerShift, resp.HasNewer = storage.NearestActivityShift(request.Period, request.Shift, false)
-				logStatisticsQuery("activity-"+activityPeriodName(request.Period), request.Shift, started)
+				logStatisticsQuery("activity-"+activityPeriodName(request.Period), request.Shift, started, storage.CacheMetrics())
 				request.ResponseChan <- resp
 
 			case types.Event:

@@ -27,6 +27,8 @@ const activityBucketPrefix = "activity/"
 
 type StatsStorage struct {
 	localStorage *diskvstorage.LocalStorage
+	cache        *reportCache
+	index        *periodIndex
 }
 
 var capitalizer = cases.Title(language.English)
@@ -82,6 +84,7 @@ func (s *StatsStorage) increaseAppUsageTime(bucket string, appName string, perio
 	milliseconds += periodAppWasActive
 	millisecondsStr := strconv.FormatInt(milliseconds, 10)
 	s.localStorage.SaveValue(bucket, appName, millisecondsStr)
+	s.noteUsageWrite(bucket, appName, milliseconds)
 }
 
 const (
@@ -154,6 +157,7 @@ func (s *StatsStorage) AddDomainSample(activeApplication string, tick types.Doma
 		return
 	}
 	s.localStorage.SaveValue(bucket, key, string(data))
+	s.noteContextualDomainWrite(at.Format(TruncatedToHour), usage)
 }
 
 // GetDomainStatistics возвращает статистику доменов за час shiftHours назад.
@@ -167,6 +171,12 @@ func (s *StatsStorage) GetDomainStatistics(shiftHours int) *types.AppInfoRespons
 // day boundaries used by the application statistics report.
 func (s *StatsStorage) GetDomainStatisticsDay(dayShift int) *types.AppInfoResponse {
 	day := time.Now().AddDate(0, 0, -dayShift).Format(TruncatedToDay)
+	cacheKey := "sites:day:" + day
+	if finalizedDay(day) {
+		if stats, ok := s.cachedAppInfos(cacheKey); ok {
+			return &types.AppInfoResponse{AppInfos: stats, TimeStamp: day, ShiftHours: dayShift}
+		}
+	}
 	totals := map[string]time.Duration{}
 	for _, hour := range s.domainHours() {
 		if !strings.HasPrefix(hour, day+"T") {
@@ -176,7 +186,11 @@ func (s *StatsStorage) GetDomainStatisticsDay(dayShift int) *types.AppInfoRespon
 			totals[site.Identity] += site.Duration
 		}
 	}
-	return domainStatisticsResponse(totals, day, dayShift)
+	response := domainStatisticsResponse(totals, day, dayShift)
+	if finalizedDay(day) {
+		s.storeAppInfos(cacheKey, response.AppInfos)
+	}
+	return response
 }
 
 // GetDomainStatisticsWeek aggregates browser-domain usage for the same
@@ -184,6 +198,13 @@ func (s *StatsStorage) GetDomainStatisticsDay(dayShift int) *types.AppInfoRespon
 func (s *StatsStorage) GetDomainStatisticsWeek(weekShift int) *types.AppInfoResponse {
 	weekStart := activityWeekStart(time.Now()).AddDate(0, 0, -7*weekShift)
 	weekEnd := weekStart.AddDate(0, 0, 6)
+	cacheKey := "sites:week:" + weekStart.Format(TruncatedToDay)
+	if finalizedWeek(weekStart) {
+		if stats, ok := s.cachedAppInfos(cacheKey); ok {
+			timestamp := weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay)
+			return &types.AppInfoResponse{AppInfos: stats, TimeStamp: timestamp, ShiftHours: weekShift}
+		}
+	}
 	totals := map[string]time.Duration{}
 	for _, hour := range s.domainHours() {
 		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
@@ -195,10 +216,28 @@ func (s *StatsStorage) GetDomainStatisticsWeek(weekShift int) *types.AppInfoResp
 		}
 	}
 	timestamp := weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay)
-	return domainStatisticsResponse(totals, timestamp, weekShift)
+	response := domainStatisticsResponse(totals, timestamp, weekShift)
+	if finalizedWeek(weekStart) {
+		s.storeAppInfos(cacheKey, response.AppInfos)
+	}
+	return response
 }
 
 func (s *StatsStorage) getDomainStatisticsHour(hour string) types.AppInfos {
+	cacheKey := "sites:hour:" + hour
+	if finalizedHour(hour) {
+		if stats, ok := s.cachedAppInfos(cacheKey); ok {
+			return stats
+		}
+	}
+	stats := s.getDomainStatisticsHourUncached(hour)
+	if finalizedHour(hour) {
+		s.storeAppInfos(cacheKey, stats)
+	}
+	return stats
+}
+
+func (s *StatsStorage) getDomainStatisticsHourUncached(hour string) types.AppInfos {
 	totals := map[string]time.Duration{}
 	for _, site := range mapDomainsToAppInfos(s.localStorage.GetValues(domainBucketPrefix + hour)) {
 		totals[site.Identity] += site.Duration
@@ -237,20 +276,8 @@ func mapContextualDomainsToAppInfos(values map[string]string) types.AppInfos {
 }
 
 func (s *StatsStorage) domainHours() []string {
-	seen := map[string]bool{}
-	for _, bucket := range s.localStorage.ListBuckets() {
-		for _, prefix := range []string{domainBucketPrefix, contextualDomainBucketPrefix} {
-			if !strings.HasPrefix(bucket, prefix) {
-				continue
-			}
-			hour := strings.TrimPrefix(bucket, prefix)
-			if _, err := time.ParseInLocation(TruncatedToHour, hour, time.Local); err == nil {
-				seen[hour] = true
-			}
-		}
-	}
-	hours := make([]string, 0, len(seen))
-	for hour := range seen {
+	hours := make([]string, 0, len(s.ensureIndex().domainHours))
+	for hour := range s.ensureIndex().domainHours {
 		hours = append(hours, hour)
 	}
 	return hours
@@ -304,7 +331,7 @@ func (s *StatsStorage) GetStatisticsShifted(shiftHours int) *types.AppInfoRespon
 // данными приложений относительно fromShift: older=true — глубже в прошлое,
 // older=false — ближе к настоящему (не ниже 0). Пропущенные часы перепрыгиваются.
 func (s *StatsStorage) NearestShift(fromShift int, older bool) (int, bool) {
-	return s.nearestHourShift("", fromShift, older)
+	return s.nearestHourShift(fromShift, older)
 }
 
 // NearestDomainShift is like NearestShift, but includes both legacy and
@@ -312,10 +339,7 @@ func (s *StatsStorage) NearestShift(fromShift int, older bool) (int, bool) {
 func (s *StatsStorage) NearestDomainShift(fromShift int, older bool) (int, bool) {
 	currentHour := time.Now().Truncate(time.Hour)
 	best := -1
-	for _, hour := range s.domainHours() {
-		if len(s.getDomainStatisticsHour(hour)) == 0 {
-			continue
-		}
+	for hour := range s.availableDomainHours() {
 		t, _ := time.ParseInLocation(TruncatedToHour, hour, time.Local)
 		shift := int(currentHour.Sub(t.Truncate(time.Hour)) / time.Hour)
 		if shift < 0 {
@@ -333,10 +357,7 @@ func (s *StatsStorage) NearestDomainShift(fromShift int, older bool) (int, bool)
 
 func (s *StatsStorage) NearestDomainDayShift(fromShift int, older bool) (int, bool) {
 	haveDay := map[string]bool{}
-	for _, hour := range s.domainHours() {
-		if len(s.getDomainStatisticsHour(hour)) == 0 {
-			continue
-		}
+	for hour := range s.availableDomainHours() {
 		if _, err := time.ParseInLocation(TruncatedToHour, hour, time.Local); err != nil {
 			continue
 		}
@@ -361,10 +382,7 @@ func (s *StatsStorage) NearestDomainDayShift(fromShift int, older bool) (int, bo
 func (s *StatsStorage) NearestDomainWeekShift(fromShift int, older bool) (int, bool) {
 	currentWeek := activityWeekStart(time.Now())
 	seen := map[int]bool{}
-	for _, hour := range s.domainHours() {
-		if len(s.getDomainStatisticsHour(hour)) == 0 {
-			continue
-		}
+	for hour := range s.availableDomainHours() {
 		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
 		if err != nil {
 			continue
@@ -411,6 +429,7 @@ func (s *StatsStorage) AddActivity(samples []types.ActivitySample) {
 		}
 		data, _ := json.Marshal(bucket)
 		s.localStorage.SaveValue(bucketName, key, string(data))
+		s.noteActivityWrite(hour)
 	}
 }
 
@@ -422,30 +441,38 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 		day := now.AddDate(0, 0, -shift)
 		resp.TimeStamp = day.Format(TruncatedToDay)
 		resp.BucketSeconds = 60 * 60
-		resp.Buckets = make([]types.ActivityBucket, 24)
-		for hour := range resp.Buckets {
-			hourName := fmt.Sprintf("%sT%02d", resp.TimeStamp, hour)
-			resp.Buckets[hour] = sumActivityBuckets(s.readActivityHour(hourName))
-		}
+		resp.Buckets = s.loadActivityBuckets("activity:day:"+resp.TimeStamp, finalizedDay(resp.TimeStamp), func() []types.ActivityBucket {
+			buckets := make([]types.ActivityBucket, 24)
+			for hour := range buckets {
+				hourName := fmt.Sprintf("%sT%02d", resp.TimeStamp, hour)
+				buckets[hour] = sumActivityBuckets(s.readActivityHour(hourName))
+			}
+			return buckets
+		})
 	case types.ActivityWeekly:
 		weekStart := activityWeekStart(now).AddDate(0, 0, -7*shift)
 		weekEnd := weekStart.AddDate(0, 0, 6)
 		resp.TimeStamp = weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay)
 		resp.BucketSeconds = 24 * 60 * 60
-		resp.Buckets = make([]types.ActivityBucket, 7)
-		for day := range resp.Buckets {
-			date := weekStart.AddDate(0, 0, day).Format(TruncatedToDay)
-			for hour := 0; hour < 24; hour++ {
-				hourName := fmt.Sprintf("%sT%02d", date, hour)
-				addActivityBucket(&resp.Buckets[day], sumActivityBuckets(s.readActivityHour(hourName)))
+		resp.Buckets = s.loadActivityBuckets("activity:week:"+weekStart.Format(TruncatedToDay), finalizedWeek(weekStart), func() []types.ActivityBucket {
+			buckets := make([]types.ActivityBucket, 7)
+			for day := range buckets {
+				date := weekStart.AddDate(0, 0, day).Format(TruncatedToDay)
+				for hour := 0; hour < 24; hour++ {
+					hourName := fmt.Sprintf("%sT%02d", date, hour)
+					addActivityBucket(&buckets[day], sumActivityBuckets(s.readActivityHour(hourName)))
+				}
 			}
-		}
+			return buckets
+		})
 	default:
 		resp.Period = types.ActivityHourly
 		hour := now.Add(-time.Duration(shift) * time.Hour).Format(TruncatedToHour)
 		resp.TimeStamp = hour
 		resp.BucketSeconds = 5 * 60
-		resp.Buckets = s.readActivityHour(hour)
+		resp.Buckets = s.loadActivityBuckets("activity:hour:"+hour, finalizedHour(hour), func() []types.ActivityBucket {
+			return s.readActivityHourUncached(hour)
+		})
 	}
 	resp.PeakSeconds = s.maxActivityPeriodSeconds(resp.Period)
 	return resp
@@ -454,12 +481,14 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 // maxActivityPeriodSeconds returns the activity record for the requested
 // granularity across all stored periods (hour, day, or Monday-Sunday week).
 func (s *StatsStorage) maxActivityPeriodSeconds(period types.ActivityPeriod) int {
-	totals := map[string]int{}
-	for _, bucket := range s.localStorage.ListBuckets() {
-		if !strings.HasPrefix(bucket, activityBucketPrefix) {
-			continue
+	cacheKey := "activity:peak:" + activityCachePeriodName(period)
+	if value, ok := s.ensureCache().get(cacheKey); ok {
+		if maximum, valid := value.(int); valid {
+			return maximum
 		}
-		hour := strings.TrimPrefix(bucket, activityBucketPrefix)
+	}
+	totals := map[string]int{}
+	for hour := range s.activityHours() {
 		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
 		if err != nil {
 			continue
@@ -471,7 +500,7 @@ func (s *StatsStorage) maxActivityPeriodSeconds(period types.ActivityPeriod) int
 		case types.ActivityWeekly:
 			key = activityWeekStart(t).Format(TruncatedToDay)
 		}
-		totals[key] += sumActivityBuckets(s.readActivityHour(hour)).ActiveSeconds()
+		totals[key] += sumActivityBuckets(s.readActivityHourUncached(hour)).ActiveSeconds()
 	}
 	maximum := 0
 	for _, total := range totals {
@@ -479,10 +508,17 @@ func (s *StatsStorage) maxActivityPeriodSeconds(period types.ActivityPeriod) int
 			maximum = total
 		}
 	}
+	s.ensureCache().set(cacheKey, maximum)
 	return maximum
 }
 
 func (s *StatsStorage) readActivityHour(hour string) []types.ActivityBucket {
+	return s.loadActivityBuckets("activity:hour:"+hour, finalizedHour(hour), func() []types.ActivityBucket {
+		return s.readActivityHourUncached(hour)
+	})
+}
+
+func (s *StatsStorage) readActivityHourUncached(hour string) []types.ActivityBucket {
 	buckets := make([]types.ActivityBucket, 12)
 	values := s.localStorage.GetValues(activityBucketPrefix + hour)
 	for i := range buckets {
@@ -527,11 +563,8 @@ func (s *StatsStorage) NearestActivityShift(period types.ActivityPeriod, fromShi
 	currentHour := now.Truncate(time.Hour)
 	currentWeek := activityWeekStart(now)
 	best := -1
-	for _, bucket := range s.localStorage.ListBuckets() {
-		if !strings.HasPrefix(bucket, activityBucketPrefix) {
-			continue
-		}
-		t, err := time.ParseInLocation(TruncatedToHour, strings.TrimPrefix(bucket, activityBucketPrefix), time.Local)
+	for hour := range s.activityHours() {
+		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
 		if err != nil {
 			continue
 		}
@@ -557,28 +590,13 @@ func (s *StatsStorage) NearestActivityShift(period types.ActivityPeriod, fromShi
 	return best, best != -1
 }
 
-// nearestHourShift обобщает поиск ближайшего непустого часа для bucket'ов с
-// заданным префиксом (пустой префикс = статистика приложений, dom/ = домены).
-func (s *StatsStorage) nearestHourShift(prefix string, fromShift int, older bool) (int, bool) {
+func (s *StatsStorage) nearestHourShift(fromShift int, older bool) (int, bool) {
 	currentHour := time.Now().Truncate(time.Hour)
 	best := -1
-	for _, bucket := range s.localStorage.ListBuckets() {
-		if !strings.HasPrefix(bucket, prefix) {
-			continue
-		}
-		t, err := time.ParseInLocation(TruncatedToHour, strings.TrimPrefix(bucket, prefix), time.Local)
+	for hour := range s.availableAppHours() {
+		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
 		if err != nil {
 			continue
-		}
-		switch prefix {
-		case "":
-			if len(s.GetStatistics(bucket)) == 0 {
-				continue
-			}
-		case domainBucketPrefix:
-			if len(mapDomainsToAppInfos(s.localStorage.GetValues(bucket))) == 0 {
-				continue
-			}
 		}
 		shift := int(currentHour.Sub(t.Truncate(time.Hour)) / time.Hour)
 		if shift < 0 {
@@ -601,6 +619,20 @@ func (s *StatsStorage) DumpBucket(bucketName string) {
 }
 
 func (s *StatsStorage) GetStatistics(bucketName string) types.AppInfos {
+	cacheKey := "apps:hour:" + bucketName
+	if finalizedHour(bucketName) {
+		if statistics, ok := s.cachedAppInfos(cacheKey); ok {
+			return statistics
+		}
+	}
+	statistics := s.getStatisticsUncached(bucketName)
+	if finalizedHour(bucketName) {
+		s.storeAppInfos(cacheKey, statistics)
+	}
+	return statistics
+}
+
+func (s *StatsStorage) getStatisticsUncached(bucketName string) types.AppInfos {
 	values := s.localStorage.GetValues(bucketName)
 	statistics := mapToAppInfos(values)
 	statistics.SortByDurationDesc()
@@ -614,8 +646,14 @@ func (s *StatsStorage) GetStatistics(bucketName string) types.AppInfos {
 // (переиспользуют ShiftHours/*Shift-поля ответа, но в дневном смысле).
 func (s *StatsStorage) GetStatisticsDay(dayShift int) *types.AppInfoResponse {
 	day := time.Now().AddDate(0, 0, -dayShift).Format(TruncatedToDay)
+	cacheKey := "apps:day:" + day
+	if finalizedDay(day) {
+		if stats, ok := s.cachedAppInfos(cacheKey); ok {
+			return &types.AppInfoResponse{AppInfos: stats, TimeStamp: day, ShiftHours: dayShift}
+		}
+	}
 	totals := map[string]time.Duration{}
-	for _, bucket := range s.localStorage.ListBuckets() {
+	for bucket := range s.appHours() {
 		if !strings.HasPrefix(bucket, day+"T") {
 			continue // не относится к этому календарному дню
 		}
@@ -629,6 +667,9 @@ func (s *StatsStorage) GetStatisticsDay(dayShift int) *types.AppInfoResponse {
 		stats = append(stats, types.AppInfo{Identity: name, Duration: dur})
 	}
 	stats.SortByDurationDesc()
+	if finalizedDay(day) {
+		s.storeAppInfos(cacheKey, stats)
+	}
 
 	return &types.AppInfoResponse{
 		AppInfos:   stats,
@@ -645,13 +686,7 @@ func (s *StatsStorage) NearestDayShift(fromShift int, older bool) (int, bool) {
 	// today - N суток (через AddDate) — устойчиво к таймзонам, в отличие от
 	// Truncate(24h), который режет по UTC-полуночи.
 	haveDay := map[string]bool{}
-	for _, bucket := range s.localStorage.ListBuckets() {
-		if _, err := time.ParseInLocation(TruncatedToHour, bucket, time.Local); err != nil {
-			continue
-		}
-		if len(s.GetStatistics(bucket)) == 0 {
-			continue
-		}
+	for bucket := range s.availableAppHours() {
 		haveDay[bucket[:len(TruncatedToDay)]] = true
 	}
 	now := time.Now()
@@ -678,8 +713,15 @@ func (s *StatsStorage) NearestDayShift(fromShift int, older bool) (int, bool) {
 func (s *StatsStorage) GetStatisticsWeek(weekShift int) *types.AppInfoResponse {
 	weekStart := activityWeekStart(time.Now()).AddDate(0, 0, -7*weekShift)
 	weekEnd := weekStart.AddDate(0, 0, 6)
+	cacheKey := "apps:week:" + weekStart.Format(TruncatedToDay)
+	if finalizedWeek(weekStart) {
+		if stats, ok := s.cachedAppInfos(cacheKey); ok {
+			timestamp := weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay)
+			return &types.AppInfoResponse{AppInfos: stats, TimeStamp: timestamp, ShiftHours: weekShift}
+		}
+	}
 	totals := map[string]time.Duration{}
-	for _, bucket := range s.localStorage.ListBuckets() {
+	for bucket := range s.appHours() {
 		t, err := time.ParseInLocation(TruncatedToHour, bucket, time.Local)
 		if err != nil || t.Before(weekStart) || !t.Before(weekEnd.AddDate(0, 0, 1)) {
 			continue
@@ -694,6 +736,9 @@ func (s *StatsStorage) GetStatisticsWeek(weekShift int) *types.AppInfoResponse {
 		stats = append(stats, types.AppInfo{Identity: name, Duration: duration})
 	}
 	stats.SortByDurationDesc()
+	if finalizedWeek(weekStart) {
+		s.storeAppInfos(cacheKey, stats)
+	}
 	return &types.AppInfoResponse{
 		AppInfos:   stats,
 		TimeStamp:  weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay),
@@ -707,9 +752,9 @@ func (s *StatsStorage) NearestWeekShift(fromShift int, older bool) (int, bool) {
 	now := time.Now()
 	currentWeek := activityWeekStart(now)
 	seen := map[int]bool{}
-	for _, bucket := range s.localStorage.ListBuckets() {
+	for bucket := range s.availableAppHours() {
 		t, err := time.ParseInLocation(TruncatedToHour, bucket, time.Local)
-		if err != nil || len(s.GetStatistics(bucket)) == 0 {
+		if err != nil {
 			continue
 		}
 		shift := int((activityDayIndex(currentWeek) - activityDayIndex(activityWeekStart(t))) / 7)
