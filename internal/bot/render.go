@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -183,6 +184,61 @@ func renderPresenceEvent(event presence.Event) models.InputRichMessage {
 	default:
 		return renderNotice("Presence unavailable", "Camera or local analysis failed repeatedly; absence was not inferred.")
 	}
+}
+
+func renderPresenceSettings(snapshot presence.Snapshot) models.InputRichMessage {
+	policy := snapshot.Policy
+	enabled := "Off"
+	if policy.Enabled {
+		enabled = "On"
+	}
+	active := "No"
+	if snapshot.ActiveNow {
+		active = "Yes"
+	}
+
+	schedule := "Always"
+	switch policy.Mode {
+	case presence.ScheduleUntil:
+		schedule = "Until " + policy.Until.Format("02.01 15:04")
+	case presence.ScheduleDaily:
+		schedule = formatPresenceMinute(policy.StartMinute) + " - " + formatPresenceMinute(policy.EndMinute)
+	}
+	days := "Every day"
+	if len(policy.WorkDays) > 0 {
+		names := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+		selected := make([]string, 0, len(policy.WorkDays))
+		for _, day := range policy.WorkDays {
+			if day >= 0 && day < len(names) {
+				selected = append(selected, names[day])
+			}
+		}
+		days = strings.Join(selected, ", ")
+	}
+	text := "Enabled: " + enabled +
+		"\nActive now: " + active +
+		"\nSchedule: " + schedule +
+		"\nDays: " + days +
+		"\nCheck: every " + formatCompactDuration(snapshot.Interval) +
+		"\nCamera after: " + formatCompactDuration(snapshot.IdleGrace) + " without input" +
+		"\nAbsence after: " + strconv.Itoa(snapshot.MissThreshold) + " checks" +
+		"\n\nSet: /presence_on [HH:MM | 1d10h30s | HH:MM-HH:MM] [Mon,Tue,Fri]"
+	return models.InputRichMessage{Blocks: []models.InputRichBlock{
+		richHeading("Presence settings"),
+		richParagraph(text),
+		richButtons(
+			richCallbackButton("Enable", "presence-enable"),
+			richCallbackButton("Disable", "presence-disable"),
+			richCallbackButton("Check now", "presence-check"),
+		),
+	}}
+}
+
+func formatPresenceMinute(minute int) string {
+	if minute == 24*60 {
+		return "24:00"
+	}
+	return fmt.Sprintf("%02d:%02d", minute/60, minute%60)
 }
 
 func renderPreformatted(title, text string) models.InputRichMessage {

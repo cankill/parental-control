@@ -23,12 +23,13 @@ type handlerRegistry struct {
 	bot       *tgbot.Bot
 	stats     *statisticsClient
 	youtube   *youtubeTimer
+	presence  *presence.Controller
 	rich      *richClient
 	commands  map[string]handlerFunc
 	callbacks map[string]handlerFunc
 }
 
-func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceEvents <-chan presence.Event) {
+func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceEvents <-chan presence.Event, presenceController *presence.Controller) {
 	wg := ctx.Value(types.WgKey{}).(*sync.WaitGroup)
 	defer wg.Done()
 
@@ -59,6 +60,7 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceEve
 		bot:       b,
 		stats:     newStatisticsClient(ctx, requests),
 		youtube:   newYoutubeTimer(ctx),
+		presence:  presenceController,
 		rich:      newRichClient(telegramAPIURL, env.BotToken, nil),
 		commands:  make(map[string]handlerFunc),
 		callbacks: make(map[string]handlerFunc),
@@ -117,6 +119,10 @@ func botCommands() []models.BotCommand {
 		{Command: "screen", Description: "Screenshot"},
 		{Command: "record", Description: "Record audio: /record [seconds]"},
 		{Command: "presence", Description: "Check if a person is at the computer"},
+		{Command: "presence_settings", Description: "Presence monitoring settings"},
+		{Command: "presence_on", Description: "Enable presence: /presence_on [period]"},
+		{Command: "presence_off", Description: "Disable presence monitoring"},
+		{Command: "presence_status", Description: "Show presence parameters"},
 		{Command: "youtube", Description: "Block / unblock YouTube"},
 	}
 }

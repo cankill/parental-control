@@ -49,6 +49,7 @@ func TestMachineNeverTreatsCameraErrorsAsAbsence(t *testing.T) {
 
 func TestScheduleUsesLocalWeekdaysAndHours(t *testing.T) {
 	options := OptionsFromValues(true, 60, 120, 3, 8, 18, []int{1, 2, 3, 4, 5})
+	policy := defaultPolicy(options)
 	for _, test := range []struct {
 		at   time.Time
 		want bool
@@ -58,8 +59,8 @@ func TestScheduleUsesLocalWeekdaysAndHours(t *testing.T) {
 		{time.Date(2026, 9, 7, 18, 0, 0, 0, time.Local), false},
 		{time.Date(2026, 9, 6, 12, 0, 0, 0, time.Local), false}, // Sunday
 	} {
-		if got := withinSchedule(test.at, options); got != test.want {
-			t.Errorf("withinSchedule(%v) = %v, want %v", test.at, got, test.want)
+		if got := policyActiveAt(policy, test.at); got != test.want {
+			t.Errorf("policyActiveAt(%v) = %v, want %v", test.at, got, test.want)
 		}
 	}
 }

@@ -523,3 +523,44 @@ func TestRenderPresenceEvents(t *testing.T) {
 		t.Fatalf("return text = %q", got)
 	}
 }
+
+func TestRenderPresenceSettings(t *testing.T) {
+	snapshot := presence.Snapshot{
+		Policy: presence.Policy{
+			Enabled: true, Mode: presence.ScheduleDaily,
+			StartMinute: 8*60 + 15, EndMinute: 18*60 + 45,
+			WorkDays: []int{1, 2, 5},
+		},
+		ActiveNow: true, Interval: time.Minute, IdleGrace: 2 * time.Minute, MissThreshold: 3,
+	}
+	message := renderPresenceSettings(snapshot)
+	got := message.Blocks[1].InputRichBlockParagraph.Text.PlainText
+	for _, want := range []string{"Enabled: On", "Active now: Yes", "Schedule: 08:15 - 18:45", "Days: Mon, Tue, Fri", "Check: every 1m", "/presence_on"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("settings text %q does not contain %q", got, want)
+		}
+	}
+	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
+	if len(buttons) != 3 {
+		t.Fatalf("settings buttons = %d, want 3", len(buttons))
+	}
+}
+
+type httpDoerFunc func(*http.Request) (*http.Response, error)
+
+func (f httpDoerFunc) Do(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestEditTreatsUnchangedTelegramMessageAsSuccess(t *testing.T) {
+	doer := httpDoerFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       io.NopCloser(strings.NewReader(`{"ok":false,"error_code":400,"description":"Bad Request: message is not modified"}`)),
+		}, nil
+	})
+	client := newRichClient("https://example.invalid", "123:test", doer)
+	if err := client.edit(context.Background(), 42, 9, renderStatus("same")); err != nil {
+		t.Fatalf("unchanged edit = %v", err)
+	}
+}

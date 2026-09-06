@@ -103,6 +103,10 @@ func (c *richClient) call(ctx context.Context, method string, fields map[string]
 		return fmt.Errorf("decode Telegram %s response (HTTP %d): %w", method, resp.StatusCode, err)
 	}
 	if !result.OK {
+		if method == "editMessageText" && result.ErrorCode == http.StatusBadRequest &&
+			strings.Contains(strings.ToLower(result.Description), "message is not modified") {
+			return nil
+		}
 		return fmt.Errorf("Telegram %s failed (%d): %s", method, result.ErrorCode, result.Description)
 	}
 	return nil

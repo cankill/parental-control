@@ -159,23 +159,6 @@ func (m *machine) observe(at time.Time, observation Observation) *Event {
 	}
 }
 
-func withinSchedule(at time.Time, options Options) bool {
-	weekdayAllowed := false
-	for _, day := range options.WorkDays {
-		if int(at.Weekday()) == day {
-			weekdayAllowed = true
-			break
-		}
-	}
-	if !weekdayAllowed {
-		return false
-	}
-	if options.StartHour == options.EndHour {
-		return true
-	}
-	return at.Hour() >= options.StartHour && at.Hour() < options.EndHour
-}
-
 func localCameraObservation() (Observation, error) {
 	path, err := media.CaptureAnalysisFrame()
 	if err != nil {
@@ -194,13 +177,10 @@ func localCameraObservation() (Observation, error) {
 
 // Monitor observes presence until ctx is cancelled. It emits only state
 // transitions, so a prolonged absence never creates repeated alerts.
-func Monitor(ctx context.Context, options Options, input *activity.InputSignal, events chan<- Event) {
-	options = options.normalized()
-	if !options.Enabled {
-		return
-	}
-	machine := newMachine(options.MissThreshold)
-	ticker := time.NewTicker(options.Interval)
+func Monitor(ctx context.Context, controller *Controller, input *activity.InputSignal, events chan<- Event) {
+	initial := controller.Snapshot(time.Now())
+	machine := newMachine(initial.MissThreshold)
+	ticker := time.NewTicker(initial.Interval)
 	defer ticker.Stop()
 
 	for {
@@ -209,12 +189,13 @@ func Monitor(ctx context.Context, options Options, input *activity.InputSignal, 
 			return
 		case at := <-ticker.C:
 			observation := ObservationOutsideSchedule
-			if withinSchedule(at, options) {
+			settings := controller.Snapshot(at)
+			if settings.ActiveNow {
 				lastInput := time.Time{}
 				if input != nil {
 					lastInput = input.LastInputAt()
 				}
-				if !lastInput.IsZero() && at.Sub(lastInput) <= options.IdleGrace {
+				if !lastInput.IsZero() && at.Sub(lastInput) <= settings.IdleGrace {
 					observation = ObservationPresent
 				} else {
 					var err error

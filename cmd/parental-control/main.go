@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"sync"
@@ -50,9 +51,6 @@ func main() {
 		go statistics.Handler(ctx, initiallyActiveApplication.BundleIdentifier(), statisticsCommandsChannel)
 
 		wg.Add(1)
-		go bot.StartBot(ctx, statisticsCommandsChannel, presenceEvents)
-
-		wg.Add(1)
 		go statistics.TrackDomains(ctx, env.UrlPollInterval(), statisticsCommandsChannel)
 
 		activityWG.Add(1)
@@ -67,10 +65,18 @@ func main() {
 			env.PresenceEndHour,
 			env.PresenceWorkDays,
 		)
+		presenceController, err := presence.OpenController(presence.SettingsPath(), presenceOptions)
+		if err != nil {
+			log.Printf("Presence settings fallback to deployment defaults: %s", err)
+		}
+
+		wg.Add(1)
+		go bot.StartBot(ctx, statisticsCommandsChannel, presenceEvents, presenceController)
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			presence.Monitor(ctx, presenceOptions, inputSignal, presenceEvents)
+			presence.Monitor(ctx, presenceController, inputSignal, presenceEvents)
 		}()
 
 		go func() {
