@@ -1,7 +1,10 @@
 package statistics
 
 import (
+	"bytes"
+	"log"
 	"parental-control/internal/lib/types"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,6 +23,22 @@ func TestMeasuredDomainMillisCapsSleepAndSchedulingGaps(t *testing.T) {
 		if got := measuredDomainMillis(test.raw, interval); got != test.want {
 			t.Errorf("measuredDomainMillis(%d) = %d, want %d", test.raw, got, test.want)
 		}
+	}
+}
+
+func TestLogStatisticsQueryOnlyReportsSlowOperations(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	logStatisticsQuery("daily", 2, time.Now())
+	if output.Len() != 0 {
+		t.Fatalf("fast query was logged: %s", output.String())
+	}
+	logStatisticsQuery("weekly", 3, time.Now().Add(-slowStatisticsQueryThreshold))
+	if got := output.String(); !strings.Contains(got, "kind=weekly shift=3 duration=") {
+		t.Fatalf("slow query log = %q", got)
 	}
 }
 

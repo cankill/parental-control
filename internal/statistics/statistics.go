@@ -3,6 +3,7 @@ package statistics
 import (
 	"context"
 	"fmt"
+	"log"
 	"parental-control/internal/appinfo"
 	"parental-control/internal/lib/types"
 	"parental-control/internal/statistics/statstorage"
@@ -10,6 +11,27 @@ import (
 	"sync"
 	"time"
 )
+
+const slowStatisticsQueryThreshold = 50 * time.Millisecond
+
+func logStatisticsQuery(kind string, shift int, started time.Time) {
+	elapsed := time.Since(started)
+	if elapsed < slowStatisticsQueryThreshold {
+		return
+	}
+	log.Printf("Slow statistics query: kind=%s shift=%d duration=%s", kind, shift, elapsed.Round(time.Millisecond))
+}
+
+func activityPeriodName(period types.ActivityPeriod) string {
+	switch period {
+	case types.ActivityDaily:
+		return "daily"
+	case types.ActivityWeekly:
+		return "weekly"
+	default:
+		return "hourly"
+	}
+}
 
 // formatAppInfo превращает результаты поиска по словарю в читаемый текст для /info.
 func formatAppInfo(name string, infos []appinfo.Info) string {
@@ -75,6 +97,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 		case command := <-commandsChannel:
 			switch command.Type() {
 			case types.Command:
+				started := time.Now()
 				request := command.(types.RequestCommand)
 				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
 				resp := storage.GetStatisticsShifted(request.ShiftHours)
@@ -84,25 +107,31 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				if request.ShiftHours == 0 && statstorage.ShouldTrackApplication(activeApplication) {
 					resp.ActiveApp = statstorage.DisplayName(activeApplication)
 				}
+				logStatisticsQuery("apps-hourly", request.ShiftHours, started)
 				request.ResponseChan <- resp
 
 			case types.DayCommand:
+				started := time.Now()
 				request := command.(types.DayRequest)
 				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
 				resp := storage.GetStatisticsDay(request.DayShift)
 				resp.OlderShift, resp.HasOlder = storage.NearestDayShift(request.DayShift, true)
 				resp.NewerShift, resp.HasNewer = storage.NearestDayShift(request.DayShift, false)
+				logStatisticsQuery("apps-daily", request.DayShift, started)
 				request.ResponseChan <- resp
 
 			case types.WeekCommand:
+				started := time.Now()
 				request := command.(types.WeekRequest)
 				activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
 				resp := storage.GetStatisticsWeek(request.WeekShift)
 				resp.OlderShift, resp.HasOlder = storage.NearestWeekShift(request.WeekShift, true)
 				resp.NewerShift, resp.HasNewer = storage.NearestWeekShift(request.WeekShift, false)
+				logStatisticsQuery("apps-weekly", request.WeekShift, started)
 				request.ResponseChan <- resp
 
 			case types.DomainCommand:
+				started := time.Now()
 				request := command.(types.DomainRequest)
 				var resp *types.AppInfoResponse
 				switch request.Period {
@@ -119,6 +148,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 					resp.OlderShift, resp.HasOlder = storage.NearestDomainShift(request.ShiftHours, true)
 					resp.NewerShift, resp.HasNewer = storage.NearestDomainShift(request.ShiftHours, false)
 				}
+				logStatisticsQuery("sites-"+activityPeriodName(request.Period), request.ShiftHours, started)
 				request.ResponseChan <- resp
 
 			case types.DomainEvent:
@@ -133,10 +163,12 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				storage.AddActivity(command.(types.ActivityBatch).Samples)
 
 			case types.ActivityCommand:
+				started := time.Now()
 				request := command.(types.ActivityRequest)
 				resp := storage.GetActivity(request.Period, request.Shift)
 				resp.OlderShift, resp.HasOlder = storage.NearestActivityShift(request.Period, request.Shift, true)
 				resp.NewerShift, resp.HasNewer = storage.NearestActivityShift(request.Period, request.Shift, false)
+				logStatisticsQuery("activity-"+activityPeriodName(request.Period), request.Shift, started)
 				request.ResponseChan <- resp
 
 			case types.Event:
