@@ -17,7 +17,6 @@ func (h *handlerRegistry) registerMediaHandlers() {
 	h.command("photo", h.sendVideo) // Compatibility with old commands and messages.
 	h.command("record", h.sendRecord)
 	h.command("presence", h.sendPresence)
-	h.command("presence_settings", h.sendPresenceSettings)
 	h.command("presence_on", h.enablePresence)
 	h.command("presence_off", h.disablePresence)
 	h.command("presence_status", h.sendPresenceSettings)

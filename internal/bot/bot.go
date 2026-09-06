@@ -119,7 +119,6 @@ func botCommands() []models.BotCommand {
 		{Command: "screen", Description: "Screenshot"},
 		{Command: "record", Description: "Record audio: /record [seconds]"},
 		{Command: "presence", Description: "Check if a person is at the computer"},
-		{Command: "presence_settings", Description: "Presence monitoring settings"},
 		{Command: "presence_on", Description: "Enable presence: /presence_on [period]"},
 		{Command: "presence_off", Description: "Disable presence monitoring"},
 		{Command: "presence_status", Description: "Show presence parameters"},
