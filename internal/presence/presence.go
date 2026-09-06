@@ -47,6 +47,14 @@ type Event struct {
 	State State
 }
 
+type CameraCheck struct {
+	Frames int
+	Humans int
+	Faces  int
+}
+
+func (c CameraCheck) Present() bool { return c.Humans > 0 || c.Faces > 0 }
+
 type Options struct {
 	Enabled       bool
 	Interval      time.Duration
@@ -160,12 +168,7 @@ func (m *machine) observe(at time.Time, observation Observation) *Event {
 }
 
 func localCameraObservation() (Observation, error) {
-	path, err := media.CaptureAnalysisFrame()
-	if err != nil {
-		return ObservationUnavailable, err
-	}
-	defer os.Remove(path)
-	detection, err := vision.AnalyzeImage(path)
+	detection, err := CheckCamera()
 	if err != nil {
 		return ObservationUnavailable, err
 	}
@@ -173,6 +176,35 @@ func localCameraObservation() (Observation, error) {
 		return ObservationPresent, nil
 	}
 	return ObservationMissing, nil
+}
+
+// CheckCamera analyzes several transient frames. A person detected in any frame
+// counts as present, which avoids false negatives caused by camera warm-up,
+// blinking, motion blur, or a brief head turn.
+func CheckCamera() (CameraCheck, error) {
+	paths, err := media.CaptureAnalysisFrames()
+	if err != nil {
+		return CameraCheck{}, err
+	}
+	defer func() {
+		for _, path := range paths {
+			_ = os.Remove(path)
+		}
+	}()
+	result := CameraCheck{Frames: len(paths)}
+	for _, path := range paths {
+		detection, err := vision.AnalyzeImage(path)
+		if err != nil {
+			return CameraCheck{}, err
+		}
+		if detection.Humans > result.Humans {
+			result.Humans = detection.Humans
+		}
+		if detection.Faces > result.Faces {
+			result.Faces = detection.Faces
+		}
+	}
+	return result, nil
 }
 
 // Monitor observes presence until ctx is cancelled. It emits only state
@@ -206,6 +238,8 @@ func Monitor(ctx context.Context, controller *Controller, input *activity.InputS
 				}
 			}
 			if event := machine.observe(at, observation); event != nil {
+				log.Printf("Presence transition: kind=%s state=%s at=%s since=%s", event.Kind, event.State,
+					event.At.Format(time.RFC3339), event.Since.Format(time.RFC3339))
 				select {
 				case events <- *event:
 				case <-ctx.Done():

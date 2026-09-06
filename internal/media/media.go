@@ -137,33 +137,56 @@ func CaptureVideo() (string, error) {
 	return "", fmt.Errorf("ffmpeg video failed: %v: %s", err, tail(out))
 }
 
-// CaptureAnalysisFrame captures one camera frame for local machine analysis.
-// The caller must remove the image as soon as analysis finishes; it must not be
-// retained or sent as part of a presence check.
-func CaptureAnalysisFrame() (string, error) {
+const analysisFrameCount = 3
+
+// CaptureAnalysisFrames captures several warmed-up camera frames for local
+// machine analysis. The caller must remove the images as soon as analysis
+// finishes; they must not be retained or sent as part of a presence check.
+func CaptureAnalysisFrames() ([]string, error) {
 	ff, err := ffmpegPath()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := os.MkdirAll(outputDir, 0700); err != nil {
-		return "", err
+		return nil, err
 	}
-	fname := filepath.Join(outputDir, fmt.Sprintf("presence-%d.jpg", time.Now().UnixNano()))
+	pattern := filepath.Join(outputDir, fmt.Sprintf("presence-%d-%%02d.jpg", time.Now().UnixNano()))
 	dev := cameraIndex(ff)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), (analysisFrameCount+15)*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, ff,
-		"-y", "-f", "avfoundation", "-framerate", "30", "-i", dev,
-		"-frames:v", "1", "-update", "1", "-q:v", "5", fname)
+	cmd := exec.CommandContext(ctx, ff, analysisCaptureArgs(dev, pattern)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		_ = os.Remove(fname)
+		removeAnalysisFrames(pattern)
 		if strings.Contains(string(out), "Input/output error") {
-			return "", fmt.Errorf("camera busy — close apps using it (Zoom/Teams/browser call) and retry")
+			return nil, fmt.Errorf("camera busy — close apps using it (Zoom/Teams/browser call) and retry")
 		}
-		return "", fmt.Errorf("ffmpeg analysis frame failed: %v: %s", err, tail(out))
+		return nil, fmt.Errorf("ffmpeg analysis frames failed: %v: %s", err, tail(out))
 	}
-	return fname, nil
+	frames := make([]string, 0, analysisFrameCount)
+	for i := 1; i <= analysisFrameCount; i++ {
+		path := strings.Replace(pattern, "%02d", fmt.Sprintf("%02d", i), 1)
+		if _, err := os.Stat(path); err != nil {
+			removeAnalysisFrames(pattern)
+			return nil, fmt.Errorf("camera returned only %d of %d analysis frames", len(frames), analysisFrameCount)
+		}
+		frames = append(frames, path)
+	}
+	return frames, nil
+}
+
+func analysisCaptureArgs(device, destinationPattern string) []string {
+	return []string{
+		"-y", "-f", "avfoundation", "-pixel_format", "nv12", "-framerate", "30", "-i", device,
+		"-ss", "0.75", "-vf", "fps=2", "-frames:v", fmt.Sprintf("%d", analysisFrameCount),
+		"-q:v", "5", destinationPattern,
+	}
+}
+
+func removeAnalysisFrames(pattern string) {
+	for i := 1; i <= analysisFrameCount; i++ {
+		_ = os.Remove(strings.Replace(pattern, "%02d", fmt.Sprintf("%02d", i), 1))
+	}
 }
 
 func videoCaptureArgs(device, destination string) []string {

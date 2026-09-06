@@ -14,10 +14,11 @@ const flushInterval = 10 * time.Second
 type counters struct {
 	keyboard uint32
 	mouse    uint32
+	presence uint32
 }
 
-// InputSignal exposes only the timestamp of the latest keyboard or mouse
-// activity. It never stores key contents, coordinates, or individual events.
+// InputSignal exposes only the timestamp of the latest keyboard or deliberate
+// mouse action. It never stores key contents, coordinates, or individual events.
 type InputSignal struct {
 	lastUnixNano atomic.Int64
 }
@@ -49,6 +50,10 @@ func classify(previous, current counters) types.ActivityKind {
 	default:
 		return types.ActivityNone
 	}
+}
+
+func hasPresenceInput(previous, current counters) bool {
+	return counterDelta(previous.presence, current.presence) > 0
 }
 
 // Track samples cumulative HID counters once per second. It records only whether
@@ -96,6 +101,7 @@ func Track(ctx context.Context, commands chan<- types.AppCommand, inputSignal *I
 				continue
 			}
 			kind := classify(previous, current)
+			presenceInput := hasPresenceInput(previous, current)
 			previous = current
 			bucket := now.Truncate(5 * time.Minute)
 			if !lastBucket.IsZero() && !bucket.Equal(lastBucket) {
@@ -103,7 +109,7 @@ func Track(ctx context.Context, commands chan<- types.AppCommand, inputSignal *I
 			}
 			lastBucket = bucket
 			if kind != types.ActivityNone {
-				if inputSignal != nil {
+				if inputSignal != nil && presenceInput {
 					inputSignal.Note(now)
 				}
 				batch = append(batch, types.ActivitySample{At: now, Kind: kind})

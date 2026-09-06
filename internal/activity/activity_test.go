@@ -32,10 +32,10 @@ func TestClassify(t *testing.T) {
 		prev, cur counters
 		want      types.ActivityKind
 	}{
-		{"none", counters{1, 2}, counters{1, 2}, types.ActivityNone},
-		{"keyboard", counters{1, 2}, counters{2, 2}, types.ActivityKeyboard},
-		{"mouse", counters{1, 2}, counters{1, 3}, types.ActivityMouse},
-		{"both", counters{1, 2}, counters{2, 3}, types.ActivityBoth},
+		{"none", counters{keyboard: 1, mouse: 2}, counters{keyboard: 1, mouse: 2}, types.ActivityNone},
+		{"keyboard", counters{keyboard: 1, mouse: 2}, counters{keyboard: 2, mouse: 2}, types.ActivityKeyboard},
+		{"mouse", counters{keyboard: 1, mouse: 2}, counters{keyboard: 1, mouse: 3}, types.ActivityMouse},
+		{"both", counters{keyboard: 1, mouse: 2}, counters{keyboard: 2, mouse: 3}, types.ActivityBoth},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -43,5 +43,15 @@ func TestClassify(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPresenceInputIgnoresPlainMouseMotion(t *testing.T) {
+	previous := counters{keyboard: 10, mouse: 20, presence: 5}
+	if hasPresenceInput(previous, counters{keyboard: 10, mouse: 21, presence: 5}) {
+		t.Fatal("plain mouse motion was treated as proof of presence")
+	}
+	if !hasPresenceInput(previous, counters{keyboard: 10, mouse: 21, presence: 6}) {
+		t.Fatal("keyboard or mouse action was not treated as proof of presence")
 	}
 }

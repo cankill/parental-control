@@ -97,6 +97,8 @@ func (h *handlerRegistry) sendPresenceNotifications(ctx context.Context, admins 
 			for _, chatID := range admins {
 				if err := h.rich.send(ctx, chatID, message, 0); err != nil {
 					log.Printf("Presence notification failed for chat %d: %s", chatID, err)
+				} else {
+					log.Printf("Presence notification sent: kind=%s chat=%d", event.Kind, chatID)
 				}
 			}
 		}

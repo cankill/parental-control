@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"parental-control/internal/media"
-	"parental-control/internal/vision"
+	"parental-control/internal/presence"
 )
 
 func (h *handlerRegistry) registerMediaHandlers() {
@@ -72,21 +72,15 @@ func (h *handlerRegistry) sendPresenceSettings(c *updateContext) error {
 }
 
 func (h *handlerRegistry) sendPresence(c *updateContext) error {
-	fname, err := media.CaptureAnalysisFrame()
-	if err != nil {
-		return c.RespondRichMessage(renderNotice("Presence check failed", err.Error()))
-	}
-	defer os.Remove(fname)
-
-	detection, err := vision.AnalyzeImage(fname)
+	detection, err := presence.CheckCamera()
 	if err != nil {
 		return c.RespondRichMessage(renderNotice("Presence check failed", err.Error()))
 	}
 	if !detection.Present() {
-		return c.RespondRichMessage(renderNotice("Presence", "No person detected."))
+		return c.RespondRichMessage(renderNotice("Presence", fmt.Sprintf("No person detected in %d frames.", detection.Frames)))
 	}
 	return c.RespondRichMessage(renderNotice("Presence", fmt.Sprintf(
-		"Person detected · upper bodies: %d · faces: %d", detection.Humans, detection.Faces)))
+		"Person detected · frames: %d · upper bodies: %d · faces: %d", detection.Frames, detection.Humans, detection.Faces)))
 }
 
 func (h *handlerRegistry) sendScreen(c *updateContext) error {
