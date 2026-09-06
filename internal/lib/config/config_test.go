@@ -45,4 +45,11 @@ func TestMustLoadParsesMultipleAdmins(t *testing.T) {
 	if env.UrlPollInterval() != 5*time.Second {
 		t.Errorf("interval = %v, want 5s", env.UrlPollInterval())
 	}
+	if env.PresenceEnabled || env.PresenceIntervalSeconds != 60 || env.PresenceIdleGraceSeconds != 120 ||
+		env.PresenceMissThreshold != 3 || env.PresenceStartHour != 8 || env.PresenceEndHour != 18 {
+		t.Errorf("presence defaults = %+v", env)
+	}
+	if len(env.PresenceWorkDays) != 5 || env.PresenceWorkDays[0] != 1 || env.PresenceWorkDays[4] != 5 {
+		t.Errorf("presence work days = %v", env.PresenceWorkDays)
+	}
 }

@@ -2,13 +2,27 @@ package activity
 
 import (
 	"math"
-	"parental-control/internal/lib/types"
 	"testing"
+	"time"
+
+	"parental-control/internal/lib/types"
 )
 
 func TestCounterDeltaWraparound(t *testing.T) {
 	if got := counterDelta(math.MaxUint32-1, 1); got != 3 {
 		t.Fatalf("delta = %d, want 3", got)
+	}
+}
+
+func TestInputSignalStoresOnlyLatestTimestamp(t *testing.T) {
+	var signal InputSignal
+	if !signal.LastInputAt().IsZero() {
+		t.Fatal("new input signal is not empty")
+	}
+	want := time.Date(2026, 9, 6, 14, 30, 0, 123, time.Local)
+	signal.Note(want)
+	if got := signal.LastInputAt(); !got.Equal(want) {
+		t.Fatalf("last input = %v, want %v", got, want)
 	}
 }
 

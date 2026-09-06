@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
+	"syscall"
+
 	"parental-control/internal/activity"
 	"parental-control/internal/bot"
 	"parental-control/internal/lib/config"
 	"parental-control/internal/lib/types"
+	"parental-control/internal/presence"
 	"parental-control/internal/statistics"
-	"sync"
-	"syscall"
 
 	"github.com/progrium/darwinkit/macos"
 	"github.com/progrium/darwinkit/macos/appkit"
@@ -35,6 +37,8 @@ func main() {
 		activityCtx = context.WithValue(activityCtx, types.WgKey{}, &activityWG)
 
 		statisticsCommandsChannel := make(chan types.AppCommand, 32)
+		presenceEvents := make(chan presence.Event, 8)
+		inputSignal := &activity.InputSignal{}
 		sigs := make(chan os.Signal, 1)
 
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -46,13 +50,28 @@ func main() {
 		go statistics.Handler(ctx, initiallyActiveApplication.BundleIdentifier(), statisticsCommandsChannel)
 
 		wg.Add(1)
-		go bot.StartBot(ctx, statisticsCommandsChannel)
+		go bot.StartBot(ctx, statisticsCommandsChannel, presenceEvents)
 
 		wg.Add(1)
 		go statistics.TrackDomains(ctx, env.UrlPollInterval(), statisticsCommandsChannel)
 
 		activityWG.Add(1)
-		go activity.Track(activityCtx, statisticsCommandsChannel)
+		go activity.Track(activityCtx, statisticsCommandsChannel, inputSignal)
+
+		presenceOptions := presence.OptionsFromValues(
+			env.PresenceEnabled,
+			env.PresenceIntervalSeconds,
+			env.PresenceIdleGraceSeconds,
+			env.PresenceMissThreshold,
+			env.PresenceStartHour,
+			env.PresenceEndHour,
+			env.PresenceWorkDays,
+		)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			presence.Monitor(ctx, presenceOptions, inputSignal, presenceEvents)
+		}()
 
 		go func() {
 			<-sigs

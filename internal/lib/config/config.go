@@ -16,6 +16,15 @@ type Env struct {
 	// URLPollSeconds — период опроса URL активного браузера для трекинга доменов.
 	// 0 (по умолчанию) означает 3с — задаётся в UrlPollInterval().
 	URLPollSeconds int `env:"URL_POLL_SECONDS"`
+	// Presence monitoring is disabled by default. When enabled, recent local
+	// input is used first and camera frames are analyzed locally only after idle.
+	PresenceEnabled          bool  `env:"PRESENCE_ENABLED" env-default:"false"`
+	PresenceIntervalSeconds  int   `env:"PRESENCE_INTERVAL_SECONDS" env-default:"60"`
+	PresenceIdleGraceSeconds int   `env:"PRESENCE_IDLE_GRACE_SECONDS" env-default:"120"`
+	PresenceMissThreshold    int   `env:"PRESENCE_MISS_THRESHOLD" env-default:"3"`
+	PresenceStartHour        int   `env:"PRESENCE_START_HOUR" env-default:"8"`
+	PresenceEndHour          int   `env:"PRESENCE_END_HOUR" env-default:"18"`
+	PresenceWorkDays         []int `env:"PRESENCE_WORK_DAYS" env-separator:"," env-default:"1,2,3,4,5"`
 }
 
 // UrlPollInterval — интервал опроса URL браузера, минимум 1с, дефолт 3с.

@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"parental-control/internal/lib/types"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"parental-control/internal/lib/types"
+	"parental-control/internal/presence"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -507,5 +509,17 @@ func TestRenderVideoAttachment(t *testing.T) {
 	attachments := richAttachments(message)
 	if len(attachments) != 1 || attachments[0].name != "camera.mp4" {
 		t.Fatalf("video attachments = %#v", attachments)
+	}
+}
+
+func TestRenderPresenceEvents(t *testing.T) {
+	since := time.Date(2026, 9, 7, 9, 5, 0, 0, time.Local)
+	absent := renderPresenceEvent(presence.Event{Kind: presence.EventAbsent, Since: since, At: since.Add(2 * time.Minute)})
+	if got := absent.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "No person detected since 07.09 09:05." {
+		t.Fatalf("absence text = %q", got)
+	}
+	returned := renderPresenceEvent(presence.Event{Kind: presence.EventReturned, Since: since, At: since.Add(3*time.Minute + 12*time.Second)})
+	if got := returned.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "Person detected after 3m 12s." {
+		t.Fatalf("return text = %q", got)
 	}
 }

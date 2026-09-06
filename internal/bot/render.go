@@ -2,10 +2,12 @@ package bot
 
 import (
 	"io"
-	"parental-control/internal/lib/types"
 	"strconv"
 	"strings"
 	"time"
+
+	"parental-control/internal/lib/types"
+	"parental-control/internal/presence"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -169,6 +171,18 @@ func renderNotice(title, text string) models.InputRichMessage {
 		blocks = append(blocks, richParagraph(text))
 	}
 	return models.InputRichMessage{Blocks: blocks}
+}
+
+func renderPresenceEvent(event presence.Event) models.InputRichMessage {
+	switch event.Kind {
+	case presence.EventAbsent:
+		return renderNotice("Presence alert", "No person detected since "+event.Since.Format("02.01 15:04")+".")
+	case presence.EventReturned:
+		duration := event.At.Sub(event.Since).Round(time.Second)
+		return renderNotice("Presence restored", "Person detected after "+formatCompactDuration(duration)+".")
+	default:
+		return renderNotice("Presence unavailable", "Camera or local analysis failed repeatedly; absence was not inferred.")
+	}
 }
 
 func renderPreformatted(title, text string) models.InputRichMessage {

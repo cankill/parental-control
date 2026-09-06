@@ -2,9 +2,11 @@ package activity
 
 import (
 	"context"
-	"parental-control/internal/lib/types"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"parental-control/internal/lib/types"
 )
 
 const flushInterval = 10 * time.Second
@@ -12,6 +14,24 @@ const flushInterval = 10 * time.Second
 type counters struct {
 	keyboard uint32
 	mouse    uint32
+}
+
+// InputSignal exposes only the timestamp of the latest keyboard or mouse
+// activity. It never stores key contents, coordinates, or individual events.
+type InputSignal struct {
+	lastUnixNano atomic.Int64
+}
+
+func (s *InputSignal) Note(at time.Time) {
+	s.lastUnixNano.Store(at.UnixNano())
+}
+
+func (s *InputSignal) LastInputAt() time.Time {
+	value := s.lastUnixNano.Load()
+	if value == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, value)
 }
 
 func counterDelta(previous, current uint32) uint32 { return current - previous }
@@ -33,7 +53,7 @@ func classify(previous, current counters) types.ActivityKind {
 
 // Track samples cumulative HID counters once per second. It records only whether
 // keyboard and/or mouse activity happened, never event contents or coordinates.
-func Track(ctx context.Context, commands chan<- types.AppCommand) {
+func Track(ctx context.Context, commands chan<- types.AppCommand, inputSignal *InputSignal) {
 	defer ctx.Value(types.WgKey{}).(*sync.WaitGroup).Done()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -83,6 +103,9 @@ func Track(ctx context.Context, commands chan<- types.AppCommand) {
 			}
 			lastBucket = bucket
 			if kind != types.ActivityNone {
+				if inputSignal != nil {
+					inputSignal.Note(now)
+				}
 				batch = append(batch, types.ActivitySample{At: now, Kind: kind})
 			}
 		}

@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"parental-control/internal/lib/config"
-	"parental-control/internal/lib/types"
 	"strings"
 	"sync"
+
+	"parental-control/internal/lib/config"
+	"parental-control/internal/lib/types"
+	"parental-control/internal/presence"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -26,7 +28,7 @@ type handlerRegistry struct {
 	callbacks map[string]handlerFunc
 }
 
-func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
+func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceEvents <-chan presence.Event) {
 	wg := ctx.Value(types.WgKey{}).(*sync.WaitGroup)
 	defer wg.Done()
 
@@ -68,8 +70,35 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand) {
 	h.registerYoutubeHandlers()
 	h.bindHandlers()
 
+	notificationCtx, stopNotifications := context.WithCancel(ctx)
+	notificationsDone := make(chan struct{})
+	go func() {
+		defer close(notificationsDone)
+		h.sendPresenceNotifications(notificationCtx, admins, presenceEvents)
+	}()
 	b.Start(ctx)
+	stopNotifications()
+	<-notificationsDone
 	fmt.Println("Bot stopped")
+}
+
+func (h *handlerRegistry) sendPresenceNotifications(ctx context.Context, admins []int64, events <-chan presence.Event) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			message := renderPresenceEvent(event)
+			for _, chatID := range admins {
+				if err := h.rich.send(ctx, chatID, message, 0); err != nil {
+					log.Printf("Presence notification failed for chat %d: %s", chatID, err)
+				}
+			}
+		}
+	}
 }
 
 func botCommands() []models.BotCommand {
