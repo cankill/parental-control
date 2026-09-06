@@ -1,10 +1,13 @@
 package bot
 
 import (
+	"fmt"
 	"os"
-	"parental-control/internal/media"
 	"strconv"
 	"strings"
+
+	"parental-control/internal/media"
+	"parental-control/internal/vision"
 )
 
 func (h *handlerRegistry) registerMediaHandlers() {
@@ -12,17 +15,38 @@ func (h *handlerRegistry) registerMediaHandlers() {
 	h.command("video", h.sendVideo)
 	h.command("photo", h.sendVideo) // Compatibility with old commands and messages.
 	h.command("record", h.sendRecord)
+	h.command("presence", h.sendPresence)
 	h.command("media", func(c *updateContext) error {
 		return c.SendRichMessage(renderMenu("Media",
 			richCallbackButton("Video", "hub-video"),
 			richCallbackButton("Screen", "hub-screen"),
 			richCallbackButton("Audio", "hub-record"),
+			richCallbackButton("Presence", "hub-presence"),
 		))
 	})
 	h.callback("hub-video", h.hubAction(h.sendVideo))
 	h.callback("hub-photo", h.hubAction(h.sendVideo)) // Keep old inline buttons working.
 	h.callback("hub-screen", h.hubAction(h.sendScreen))
 	h.callback("hub-record", h.hubAction(h.sendRecord))
+	h.callback("hub-presence", h.hubAction(h.sendPresence))
+}
+
+func (h *handlerRegistry) sendPresence(c *updateContext) error {
+	fname, err := media.CaptureAnalysisFrame()
+	if err != nil {
+		return c.RespondRichMessage(renderNotice("Presence check failed", err.Error()))
+	}
+	defer os.Remove(fname)
+
+	detection, err := vision.AnalyzeImage(fname)
+	if err != nil {
+		return c.RespondRichMessage(renderNotice("Presence check failed", err.Error()))
+	}
+	if !detection.Present() {
+		return c.RespondRichMessage(renderNotice("Presence", "No person detected."))
+	}
+	return c.RespondRichMessage(renderNotice("Presence", fmt.Sprintf(
+		"Person detected · upper bodies: %d · faces: %d", detection.Humans, detection.Faces)))
 }
 
 func (h *handlerRegistry) sendScreen(c *updateContext) error {

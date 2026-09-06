@@ -137,6 +137,35 @@ func CaptureVideo() (string, error) {
 	return "", fmt.Errorf("ffmpeg video failed: %v: %s", err, tail(out))
 }
 
+// CaptureAnalysisFrame captures one camera frame for local machine analysis.
+// The caller must remove the image as soon as analysis finishes; it must not be
+// retained or sent as part of a presence check.
+func CaptureAnalysisFrame() (string, error) {
+	ff, err := ffmpegPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(outputDir, 0700); err != nil {
+		return "", err
+	}
+	fname := filepath.Join(outputDir, fmt.Sprintf("presence-%d.jpg", time.Now().UnixNano()))
+	dev := cameraIndex(ff)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ff,
+		"-y", "-f", "avfoundation", "-framerate", "30", "-i", dev,
+		"-frames:v", "1", "-update", "1", "-q:v", "5", fname)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		_ = os.Remove(fname)
+		if strings.Contains(string(out), "Input/output error") {
+			return "", fmt.Errorf("camera busy — close apps using it (Zoom/Teams/browser call) and retry")
+		}
+		return "", fmt.Errorf("ffmpeg analysis frame failed: %v: %s", err, tail(out))
+	}
+	return fname, nil
+}
+
 func videoCaptureArgs(device, destination string) []string {
 	return []string{
 		"-y", "-f", "avfoundation", "-framerate", "30", "-i", device,

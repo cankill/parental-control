@@ -87,6 +87,7 @@ func botCommands() []models.BotCommand {
 		{Command: "video", Description: "5-second video from camera"},
 		{Command: "screen", Description: "Screenshot"},
 		{Command: "record", Description: "Record audio: /record [seconds]"},
+		{Command: "presence", Description: "Check if a person is at the computer"},
 		{Command: "youtube", Description: "Block / unblock YouTube"},
 	}
 }
