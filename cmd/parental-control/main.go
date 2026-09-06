@@ -76,7 +76,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			presence.Monitor(ctx, presenceController, inputSignal, presenceEvents)
+			presence.Monitor(ctx, presenceController, inputSignal, presenceEvents, statisticsCommandsChannel)
 		}()
 
 		go func() {

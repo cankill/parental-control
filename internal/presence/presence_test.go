@@ -3,6 +3,8 @@ package presence
 import (
 	"testing"
 	"time"
+
+	"parental-control/internal/lib/types"
 )
 
 func TestMachineDebouncesAbsenceAndReportsReturn(t *testing.T) {
@@ -27,6 +29,17 @@ func TestMachineDebouncesAbsenceAndReportsReturn(t *testing.T) {
 	returned := machine.observe(start.Add(5*time.Minute), ObservationPresent)
 	if returned == nil || returned.Kind != EventReturned || !returned.Since.Equal(start.Add(time.Minute)) {
 		t.Fatalf("return event = %+v", returned)
+	}
+}
+
+func TestObservationSampleStoresOnlyPrivacyPreservingState(t *testing.T) {
+	at := time.Date(2026, 9, 7, 9, 0, 0, 0, time.Local)
+	sample, ok := observationSample(at, time.Minute, 3, ObservationMissing)
+	if !ok || sample.At != at || sample.Kind != types.PresenceMissing || sample.Seconds != 60 || sample.MissThreshold != 3 {
+		t.Fatalf("presence sample = %+v, %v", sample, ok)
+	}
+	if _, ok := observationSample(at, time.Minute, 3, ObservationOutsideSchedule); ok {
+		t.Fatal("outside-schedule observation was persisted")
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"parental-control/internal/lib/types"
 	"parental-control/internal/media"
 	"parental-control/internal/presence"
 )
@@ -39,6 +40,10 @@ func (h *handlerRegistry) registerMediaHandlers() {
 	h.callback("presence-disable", h.disablePresence)
 	h.callback("presence-status", h.sendPresenceSettings)
 	h.callback("presence-check", h.hubAction(h.sendPresence))
+	h.callback("presence-report-day", h.selectPresenceReport(types.ActivityDaily))
+	h.callback("presence-report-week", h.selectPresenceReport(types.ActivityWeekly))
+	h.callback("presence-report-prev", h.navigatePresenceReport)
+	h.callback("presence-report-next", h.navigatePresenceReport)
 }
 
 func (h *handlerRegistry) enablePresence(c *updateContext) error {

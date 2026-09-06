@@ -18,6 +18,8 @@ const (
 	AppInfoCommand
 	ActivityEvent
 	ActivityCommand
+	PresenceEvent
+	PresenceCommand
 )
 
 type RequestCommand struct {
@@ -81,6 +83,90 @@ type ActivityResponse struct {
 	NewerShift    int
 	HasOlder      bool
 	HasNewer      bool
+}
+
+type PresenceKind uint8
+
+const (
+	PresencePresent PresenceKind = iota + 1
+	PresenceMissing
+	PresenceUnavailable
+)
+
+// PresenceSample is a privacy-preserving monitoring observation. It contains
+// only a timestamp, aggregate state, and covered duration; no images or
+// biometric data are retained.
+type PresenceSample struct {
+	At            time.Time
+	Kind          PresenceKind
+	Seconds       int
+	MissThreshold int
+}
+
+func (s PresenceSample) Type() AppCommandType { return PresenceEvent }
+
+type PresenceRequest struct {
+	Period       ActivityPeriod
+	Shift        int
+	ResponseChan chan<- *PresenceResponse
+}
+
+func (r PresenceRequest) Type() AppCommandType { return PresenceCommand }
+
+type PresenceAbsence struct {
+	Start   time.Time
+	End     time.Time
+	Seconds int
+}
+
+type PresenceDaySummary struct {
+	Date               string
+	PresentSeconds     int
+	AbsentSeconds      int
+	UnavailableSeconds int
+	AbsenceCount       int
+	LongestAbsence     int
+	Absences           []PresenceAbsence
+}
+
+func (s PresenceDaySummary) MonitoredSeconds() int {
+	return s.PresentSeconds + s.AbsentSeconds + s.UnavailableSeconds
+}
+
+func (s PresenceDaySummary) PresencePercent() int {
+	known := s.PresentSeconds + s.AbsentSeconds
+	if known == 0 {
+		return 0
+	}
+	return (s.PresentSeconds*100 + known/2) / known
+}
+
+type PresenceResponse struct {
+	Period             ActivityPeriod
+	TimeStamp          string
+	Shift              int
+	Days               []PresenceDaySummary
+	PresentSeconds     int
+	AbsentSeconds      int
+	UnavailableSeconds int
+	AbsenceCount       int
+	LongestAbsence     int
+	OlderShift         int
+	NewerShift         int
+	HasOlder           bool
+	HasNewer           bool
+}
+
+func (r PresenceResponse) MonitoredSeconds() int {
+	return r.PresentSeconds + r.AbsentSeconds + r.UnavailableSeconds
+}
+
+func (r PresenceResponse) PresencePercent() int {
+	known := r.PresentSeconds + r.AbsentSeconds
+	if known == 0 {
+		return 0
+	}
+	return (r.PresentSeconds*100 + known/2) / known
 }
 
 func (sc RequestCommand) Type() AppCommandType {

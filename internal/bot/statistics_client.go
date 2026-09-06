@@ -75,6 +75,14 @@ func (c *statisticsClient) activity(period types.ActivityPeriod, shift int) (*ty
 	return receive(c.ctx, response)
 }
 
+func (c *statisticsClient) presence(period types.ActivityPeriod, shift int) (*types.PresenceResponse, error) {
+	response := make(chan *types.PresenceResponse, 1)
+	if err := c.send(types.PresenceRequest{Period: period, Shift: shift, ResponseChan: response}); err != nil {
+		return nil, err
+	}
+	return receive(c.ctx, response)
+}
+
 func (c *statisticsClient) send(command types.AppCommand) error {
 	select {
 	case c.requests <- command:

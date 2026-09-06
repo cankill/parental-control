@@ -65,6 +65,7 @@ type periodIndex struct {
 	appHours       map[string]struct{}
 	domainHours    map[string]struct{}
 	activityHours  map[string]struct{}
+	presenceDays   map[string]struct{}
 	availableApps  map[string]struct{}
 	availableSites map[string]struct{}
 	appsScanned    bool
@@ -76,6 +77,7 @@ func newPeriodIndex(buckets []string) *periodIndex {
 		appHours:       make(map[string]struct{}),
 		domainHours:    make(map[string]struct{}),
 		activityHours:  make(map[string]struct{}),
+		presenceDays:   make(map[string]struct{}),
 		availableApps:  make(map[string]struct{}),
 		availableSites: make(map[string]struct{}),
 	}
@@ -93,8 +95,16 @@ func (i *periodIndex) addBucket(bucket string) {
 		i.addHour(i.domainHours, strings.TrimPrefix(bucket, domainBucketPrefix))
 	case strings.HasPrefix(bucket, activityBucketPrefix):
 		i.addHour(i.activityHours, strings.TrimPrefix(bucket, activityBucketPrefix))
+	case strings.HasPrefix(bucket, presenceBucketPrefix):
+		i.addDay(i.presenceDays, strings.TrimPrefix(bucket, presenceBucketPrefix))
 	default:
 		i.addHour(i.appHours, bucket)
+	}
+}
+
+func (i *periodIndex) addDay(target map[string]struct{}, day string) {
+	if _, err := time.ParseInLocation(TruncatedToDay, day, time.Local); err == nil {
+		target[day] = struct{}{}
 	}
 }
 
@@ -178,12 +188,25 @@ func (s *StatsStorage) noteActivityWrite(hour string) {
 	s.removeCached("activity:peak:hourly", "activity:peak:daily", "activity:peak:weekly")
 }
 
+func (s *StatsStorage) notePresenceWrite(day string) {
+	s.noteBucket(presenceBucketPrefix + day)
+	date, err := time.ParseInLocation(TruncatedToDay, day, time.Local)
+	if err != nil {
+		return
+	}
+	s.removeCached("presence:day:"+day, "presence:week:"+activityWeekStart(date).Format(TruncatedToDay))
+}
+
 func (s *StatsStorage) appHours() map[string]struct{} {
 	return s.ensureIndex().appHours
 }
 
 func (s *StatsStorage) activityHours() map[string]struct{} {
 	return s.ensureIndex().activityHours
+}
+
+func (s *StatsStorage) presenceDays() map[string]struct{} {
+	return s.ensureIndex().presenceDays
 }
 
 func (s *StatsStorage) availableAppHours() map[string]struct{} {

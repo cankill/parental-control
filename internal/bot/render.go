@@ -230,8 +230,106 @@ func renderPresenceSettings(snapshot presence.Snapshot) models.InputRichMessage 
 			richCallbackButton("Enable", "presence-enable"),
 			richCallbackButton("Disable", "presence-disable"),
 			richCallbackButton("Check now", "presence-check"),
+			richCallbackButton("Today", "presence-report-day"),
+			richCallbackButton("Week", "presence-report-week"),
 		),
 	}}
+}
+
+func renderPresenceReport(response *types.PresenceResponse) models.InputRichMessage {
+	periodLabel := "Day"
+	if response.Period == types.ActivityWeekly {
+		periodLabel = "Week"
+	}
+	blocks := []models.InputRichBlock{
+		richHeading("Presence · " + periodLabel + ": " + formatReportTimestamp(response.TimeStamp)),
+	}
+	if response.MonitoredSeconds() == 0 {
+		blocks = append(blocks, richParagraph("No Presence Data"))
+	} else {
+		text := "Present: " + formatCompactDuration(time.Duration(response.PresentSeconds)*time.Second) +
+			"\nAway: " + formatCompactDuration(time.Duration(response.AbsentSeconds)*time.Second) +
+			"\nPresence: " + strconv.Itoa(response.PresencePercent()) + "%" +
+			"\nAbsences: " + strconv.Itoa(response.AbsenceCount)
+		if response.LongestAbsence > 0 {
+			text += "\nLongest away: " + formatCompactDuration(time.Duration(response.LongestAbsence)*time.Second)
+		}
+		if response.UnavailableSeconds > 0 {
+			text += "\nUnavailable: " + formatCompactDuration(time.Duration(response.UnavailableSeconds)*time.Second)
+		}
+		blocks = append(blocks, richParagraph(text))
+		if response.Period == types.ActivityWeekly {
+			if table, ok := renderPresenceWeekTable(response.Days); ok {
+				blocks = append(blocks, table)
+			}
+		} else if len(response.Days) > 0 {
+			if table, ok := renderPresenceAbsenceTable(response.Days[0].Absences); ok {
+				blocks = append(blocks, table)
+			}
+		}
+	}
+	blocks = append(blocks, richButtons(presenceReportButtons(response)...))
+	return models.InputRichMessage{Blocks: blocks}
+}
+
+func renderPresenceWeekTable(days []types.PresenceDaySummary) (models.InputRichBlock, bool) {
+	rows := [][]models.RichBlockTableCell{
+		{richTableCell("Day", true, "left"), richTableCell("Present", true, "right"), richTableCell("Away", true, "right")},
+	}
+	for _, day := range days {
+		if day.MonitoredSeconds() == 0 {
+			continue
+		}
+		parsed, err := time.ParseInLocation("2006-01-02", day.Date, time.Local)
+		if err != nil {
+			continue
+		}
+		rows = append(rows, []models.RichBlockTableCell{
+			richTableCell(parsed.Format("Mon 02.01"), false, "left"),
+			richTableCell(formatTableDuration(time.Duration(day.PresentSeconds)*time.Second)+" · "+strconv.Itoa(day.PresencePercent())+"%", false, "right"),
+			richTableCell(formatTableDuration(time.Duration(day.AbsentSeconds)*time.Second), false, "right"),
+		})
+	}
+	if len(rows) == 1 {
+		return models.InputRichBlock{}, false
+	}
+	return models.InputRichBlock{Type: models.RichBlockTypeTable, InputRichBlockTable: &models.InputRichBlockTable{Cells: rows, IsCompact: true}}, true
+}
+
+func renderPresenceAbsenceTable(absences []types.PresenceAbsence) (models.InputRichBlock, bool) {
+	if len(absences) == 0 {
+		return models.InputRichBlock{}, false
+	}
+	rows := [][]models.RichBlockTableCell{
+		{richTableCell("Away", true, "left"), richTableCell("Time", true, "right")},
+	}
+	start := 0
+	const maxRows = 8
+	if len(absences) > maxRows {
+		start = len(absences) - maxRows
+	}
+	for _, absence := range absences[start:] {
+		rows = append(rows, []models.RichBlockTableCell{
+			richTableCell(absence.Start.Format("15:04")+" - "+absence.End.Format("15:04"), false, "left"),
+			richTableCell(formatTableDuration(time.Duration(absence.Seconds)*time.Second), false, "right"),
+		})
+	}
+	return models.InputRichBlock{Type: models.RichBlockTypeTable, InputRichBlockTable: &models.InputRichBlockTable{Cells: rows, IsCompact: true}}, true
+}
+
+func presenceReportButtons(response *types.PresenceResponse) []models.RichMessageButton {
+	buttons := []models.RichMessageButton{
+		richCallbackButton("Day", "presence-report-day"),
+		richCallbackButton("Week", "presence-report-week"),
+	}
+	if response.HasOlder {
+		buttons = append(buttons, richCallbackButton("‹", "presence-report-prev", presenceReportTarget(response.Period, response.OlderShift)))
+	}
+	if response.HasNewer {
+		buttons = append(buttons, richCallbackButton("›", "presence-report-next", presenceReportTarget(response.Period, response.NewerShift)))
+	}
+	buttons = append(buttons, richCallbackButton("Settings", "hub-presence-settings"))
+	return buttons
 }
 
 func formatPresenceMinute(minute int) string {

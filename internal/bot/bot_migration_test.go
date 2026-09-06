@@ -541,8 +541,11 @@ func TestRenderPresenceSettings(t *testing.T) {
 		}
 	}
 	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
-	if len(buttons) != 3 {
-		t.Fatalf("settings buttons = %d, want 3", len(buttons))
+	if len(buttons) != 5 {
+		t.Fatalf("settings buttons = %d, want 5", len(buttons))
+	}
+	if buttons[3].CallbackData != "\fpresence-report-day" || buttons[4].CallbackData != "\fpresence-report-week" {
+		t.Fatalf("analytics buttons = %#v", buttons[3:])
 	}
 }
 

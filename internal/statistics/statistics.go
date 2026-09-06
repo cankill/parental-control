@@ -76,8 +76,11 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 			for {
 				select {
 				case command := <-commandsChannel:
-					if command.Type() == types.ActivityEvent {
+					switch command.Type() {
+					case types.ActivityEvent:
 						storage.AddActivity(command.(types.ActivityBatch).Samples)
+					case types.PresenceEvent:
+						storage.AddPresenceSample(command.(types.PresenceSample))
 					}
 				default:
 					goto drained
@@ -170,6 +173,18 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				resp.OlderShift, resp.HasOlder = storage.NearestActivityShift(request.Period, request.Shift, true)
 				resp.NewerShift, resp.HasNewer = storage.NearestActivityShift(request.Period, request.Shift, false)
 				logStatisticsQuery("activity-"+activityPeriodName(request.Period), request.Shift, started, storage.CacheMetrics())
+				request.ResponseChan <- resp
+
+			case types.PresenceEvent:
+				storage.AddPresenceSample(command.(types.PresenceSample))
+
+			case types.PresenceCommand:
+				started := time.Now()
+				request := command.(types.PresenceRequest)
+				resp := storage.GetPresence(request.Period, request.Shift)
+				resp.OlderShift, resp.HasOlder = storage.NearestPresenceShift(request.Period, request.Shift, true)
+				resp.NewerShift, resp.HasNewer = storage.NearestPresenceShift(request.Period, request.Shift, false)
+				logStatisticsQuery("presence-"+activityPeriodName(request.Period), request.Shift, started, storage.CacheMetrics())
 				request.ResponseChan <- resp
 
 			case types.Event:

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"parental-control/internal/activity"
+	"parental-control/internal/lib/types"
 	"parental-control/internal/media"
 	"parental-control/internal/vision"
 )
@@ -209,7 +210,7 @@ func CheckCamera() (CameraCheck, error) {
 
 // Monitor observes presence until ctx is cancelled. It emits only state
 // transitions, so a prolonged absence never creates repeated alerts.
-func Monitor(ctx context.Context, controller *Controller, input *activity.InputSignal, events chan<- Event) {
+func Monitor(ctx context.Context, controller *Controller, input *activity.InputSignal, events chan<- Event, samples chan<- types.AppCommand) {
 	initial := controller.Snapshot(time.Now())
 	machine := newMachine(initial.MissThreshold)
 	ticker := time.NewTicker(initial.Interval)
@@ -237,6 +238,13 @@ func Monitor(ctx context.Context, controller *Controller, input *activity.InputS
 					}
 				}
 			}
+			if sample, ok := observationSample(at, settings.Interval, settings.MissThreshold, observation); ok && samples != nil {
+				select {
+				case samples <- sample:
+				case <-ctx.Done():
+					return
+				}
+			}
 			if event := machine.observe(at, observation); event != nil {
 				log.Printf("Presence transition: kind=%s state=%s at=%s since=%s", event.Kind, event.State,
 					event.At.Format(time.RFC3339), event.Since.Format(time.RFC3339))
@@ -248,4 +256,26 @@ func Monitor(ctx context.Context, controller *Controller, input *activity.InputS
 			}
 		}
 	}
+}
+
+func observationSample(at time.Time, interval time.Duration, missThreshold int, observation Observation) (types.PresenceSample, bool) {
+	kind := types.PresenceKind(0)
+	switch observation {
+	case ObservationPresent:
+		kind = types.PresencePresent
+	case ObservationMissing:
+		kind = types.PresenceMissing
+	case ObservationUnavailable:
+		kind = types.PresenceUnavailable
+	default:
+		return types.PresenceSample{}, false
+	}
+	seconds := int(interval / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	if missThreshold < 1 {
+		missThreshold = 1
+	}
+	return types.PresenceSample{At: at, Kind: kind, Seconds: seconds, MissThreshold: missThreshold}, true
 }
