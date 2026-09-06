@@ -1,7 +1,9 @@
 package statstorage
 
 import (
+	"encoding/json"
 	"parental-control/internal/lib/storage/local/diskvstorage"
+	"parental-control/internal/lib/types"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +189,69 @@ func TestDomainStatistics(t *testing.T) {
 	// Домены не попадают в статистику приложений (разные bucket-префиксы).
 	if len(st.GetStatisticsShifted(0).AppInfos) != 0 {
 		t.Fatalf("app stats should be empty, domains leaked in")
+	}
+}
+
+func TestContextualDomainSamplesAreStoredRawAndFilteredAtCalculation(t *testing.T) {
+	st := newTestStorage(t)
+	now := time.Now()
+	chrome := "com.google.Chrome"
+
+	samples := []struct {
+		active string
+		tick   types.DomainTick
+	}{
+		{loginWindowBundleID, types.DomainTick{At: now, BrowserBundleID: chrome, Domain: "locked.example.com", RawMillis: 300000, Millis: 3000}},
+		{chrome, types.DomainTick{At: now, BrowserBundleID: chrome, Domain: "newtab", RawMillis: 3000, Millis: 3000}},
+		{"com.apple.Safari", types.DomainTick{At: now, BrowserBundleID: chrome, Domain: "stale.example.com", RawMillis: 3000, Millis: 3000}},
+		{chrome, types.DomainTick{At: now, BrowserBundleID: chrome, Domain: "work.example.com", RawMillis: 3000, Millis: 3000}},
+	}
+	for _, sample := range samples {
+		st.AddDomainSample(sample.active, sample.tick)
+	}
+	st.AddDomainSample(loginWindowBundleID, types.DomainTick{
+		At: now.Add(-2 * time.Hour), BrowserBundleID: chrome, Domain: "old-locked.example.com", RawMillis: 3000, Millis: 3000,
+	})
+	// The same valid context aggregates into its existing raw record.
+	st.AddDomainSample(chrome, types.DomainTick{At: now, BrowserBundleID: chrome, Domain: "work.example.com", RawMillis: 3100, Millis: 3000})
+
+	bucket := contextualDomainBucketPrefix + now.Format(TruncatedToHour)
+	stored := st.localStorage.GetValues(bucket)
+	if len(stored) != 4 {
+		t.Fatalf("stored contextual samples = %d, want all 4 contexts", len(stored))
+	}
+	var locked storedDomainUsage
+	for _, raw := range stored {
+		var usage storedDomainUsage
+		if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+			t.Fatal(err)
+		}
+		if usage.Domain == "locked.example.com" {
+			locked = usage
+		}
+	}
+	if locked.RawMillis != 300000 || locked.Millis != 3000 {
+		t.Fatalf("locked raw sample = %+v, want raw=300000 and measured=3000", locked)
+	}
+
+	resp := st.GetDomainStatistics(0)
+	if len(resp.AppInfos) != 1 || resp.AppInfos[0].Identity != "work.example.com" || resp.AppInfos[0].Duration != 6*time.Second {
+		t.Fatalf("calculated domains = %+v, want only work.example.com for 6s", resp.AppInfos)
+	}
+	if day := st.GetDomainStatisticsDay(0); len(day.AppInfos) != 1 || day.AppInfos[0].Duration != 6*time.Second {
+		t.Fatalf("daily contextual domains = %+v", day.AppInfos)
+	}
+	if week := st.GetDomainStatisticsWeek(0); len(week.AppInfos) != 1 || week.AppInfos[0].Duration != 6*time.Second {
+		t.Fatalf("weekly contextual domains = %+v", week.AppInfos)
+	}
+	if _, ok := st.NearestDomainShift(0, true); ok {
+		t.Fatal("locked-only contextual hour must not be available for navigation")
+	}
+	if shift, ok := st.NearestDomainDayShift(1, false); !ok || shift != 0 {
+		t.Fatalf("newer contextual day = (%d,%v), want (0,true)", shift, ok)
+	}
+	if shift, ok := st.NearestDomainWeekShift(1, false); !ok || shift != 0 {
+		t.Fatalf("newer contextual week = (%d,%v), want (0,true)", shift, ok)
 	}
 }
 

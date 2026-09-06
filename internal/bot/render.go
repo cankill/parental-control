@@ -104,13 +104,13 @@ func renderUsageTable(identityLabel string, resp *types.AppInfoResponse) (models
 		}
 		rows = append(rows, []models.RichBlockTableCell{
 			richTableCell(name, false, "left"),
-			richTableCell(formatCompactDuration(app.Duration), false, "right"),
+			richTableCell(formatTableDuration(app.Duration), false, "right"),
 		})
 		total += app.Duration
 	}
 	rows = append(rows, []models.RichBlockTableCell{
 		richTableCell("Total", true, "left"),
-		richTableCell(formatCompactDuration(total), true, "right"),
+		richTableCell(formatTableDuration(total), true, "right"),
 	})
 
 	return models.InputRichBlock{
@@ -287,6 +287,12 @@ func formatCompactDuration(duration time.Duration) string {
 		previous = r
 	}
 	return formatted.String()
+}
+
+// Telegram may make the Time column very narrow when a domain is long. Keep a
+// compact duration on one line while preserving normal spacing elsewhere.
+func formatTableDuration(duration time.Duration) string {
+	return strings.ReplaceAll(formatCompactDuration(duration), " ", "\u00a0")
 }
 
 func formatReportTimestamp(value string) string {

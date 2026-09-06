@@ -67,14 +67,23 @@ func FrontmostBundleID() (string, error) {
 // FrontmostBrowserURL возвращает URL активной вкладки, если frontmost-приложение —
 // поддерживаемый браузер; иначе пустую строку (без ошибки).
 func FrontmostBrowserURL() (string, error) {
-	bundleID, err := FrontmostBundleID()
+	_, rawURL, err := FrontmostBrowserTab()
+	return rawURL, err
+}
+
+// FrontmostBrowserTab returns both the bundle identifier and URL observed in
+// one browser poll. Keeping the bundle identifier lets statistics correlate a
+// URL with the independently observed foreground application/session state.
+func FrontmostBrowserTab() (bundleID, rawURL string, err error) {
+	bundleID, err = FrontmostBundleID()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if !IsBrowser(bundleID) {
-		return "", nil
+		return bundleID, "", nil
 	}
-	return ActiveTabURL(bundleID)
+	rawURL, err = ActiveTabURL(bundleID)
+	return bundleID, rawURL, err
 }
 
 // Domain извлекает хост (домен) из URL. Пустая строка, если распарсить не удалось.

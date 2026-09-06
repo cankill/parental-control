@@ -1,6 +1,7 @@
 package statstorage
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -83,8 +84,22 @@ func (s *StatsStorage) increaseAppUsageTime(bucket string, appName string, perio
 	s.localStorage.SaveValue(bucket, appName, millisecondsStr)
 }
 
-// domainBucketPrefix отделяет доменную статистику от приложений в общем diskv.
-const domainBucketPrefix = "dom/"
+const (
+	// domainBucketPrefix contains the legacy domain-only counters. Keep reading
+	// them so reports retain history written by older versions.
+	domainBucketPrefix = "dom/"
+	// contextualDomainBucketPrefix stores the observed browser/domain together
+	// with the foreground application known by the application event tracker.
+	contextualDomainBucketPrefix = "domctx/"
+)
+
+type storedDomainUsage struct {
+	ActiveApplication string `json:"active_application"`
+	BrowserBundleID   string `json:"browser_bundle_id"`
+	Domain            string `json:"domain"`
+	RawMillis         int64  `json:"raw_millis"`
+	Millis            int64  `json:"millis"`
+}
 
 // AddDomainTime добавляет ms миллисекунд времени домена в текущий часовой bucket.
 // Домены хранятся отдельно от приложений (префикс dom/), поэтому не попадают в
@@ -97,12 +112,54 @@ func (s *StatsStorage) AddDomainTime(domain string, ms int64) {
 	s.increaseAppUsageTime(bucket, domain, ms)
 }
 
+// AddDomainSample preserves the complete browser observation and its foreground
+// application context. Filtering happens only when statistics are calculated.
+func (s *StatsStorage) AddDomainSample(activeApplication string, tick types.DomainTick) {
+	at := tick.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	rawMillis := tick.RawMillis
+	if rawMillis <= 0 {
+		rawMillis = tick.Millis
+	}
+	if rawMillis <= 0 && tick.Millis <= 0 {
+		return
+	}
+
+	contextKey := activeApplication + "\x00" + tick.BrowserBundleID + "\x00" + tick.Domain
+	hash := sha256.Sum256([]byte(contextKey))
+	key := fmt.Sprintf("%x", hash[:])
+	bucket := contextualDomainBucketPrefix + at.Format(TruncatedToHour)
+
+	usage := storedDomainUsage{
+		ActiveApplication: activeApplication,
+		BrowserBundleID:   tick.BrowserBundleID,
+		Domain:            tick.Domain,
+	}
+	if stored := s.localStorage.GetValue(bucket, key); stored != "" {
+		if err := json.Unmarshal([]byte(stored), &usage); err != nil {
+			fmt.Printf("domain: corrupt %s/%s, replacing: %s\n", bucket, key, err)
+			usage = storedDomainUsage{
+				ActiveApplication: activeApplication,
+				BrowserBundleID:   tick.BrowserBundleID,
+				Domain:            tick.Domain,
+			}
+		}
+	}
+	usage.RawMillis += rawMillis
+	usage.Millis += tick.Millis
+	data, err := json.Marshal(usage)
+	if err != nil {
+		return
+	}
+	s.localStorage.SaveValue(bucket, key, string(data))
+}
+
 // GetDomainStatistics возвращает статистику доменов за час shiftHours назад.
 func (s *StatsStorage) GetDomainStatistics(shiftHours int) *types.AppInfoResponse {
 	hour := time.Now().Add(-time.Duration(shiftHours) * time.Hour).Format(TruncatedToHour)
-	values := s.localStorage.GetValues(domainBucketPrefix + hour)
-	stats := mapDomainsToAppInfos(values)
-	stats.SortByDurationDesc()
+	stats := s.getDomainStatisticsHour(hour)
 	return &types.AppInfoResponse{AppInfos: stats, TimeStamp: hour, ShiftHours: shiftHours}
 }
 
@@ -111,11 +168,11 @@ func (s *StatsStorage) GetDomainStatistics(shiftHours int) *types.AppInfoRespons
 func (s *StatsStorage) GetDomainStatisticsDay(dayShift int) *types.AppInfoResponse {
 	day := time.Now().AddDate(0, 0, -dayShift).Format(TruncatedToDay)
 	totals := map[string]time.Duration{}
-	for _, bucket := range s.localStorage.ListBuckets() {
-		if !strings.HasPrefix(bucket, domainBucketPrefix+day+"T") {
+	for _, hour := range s.domainHours() {
+		if !strings.HasPrefix(hour, day+"T") {
 			continue
 		}
-		for _, site := range mapDomainsToAppInfos(s.localStorage.GetValues(bucket)) {
+		for _, site := range s.getDomainStatisticsHour(hour) {
 			totals[site.Identity] += site.Duration
 		}
 	}
@@ -128,20 +185,75 @@ func (s *StatsStorage) GetDomainStatisticsWeek(weekShift int) *types.AppInfoResp
 	weekStart := activityWeekStart(time.Now()).AddDate(0, 0, -7*weekShift)
 	weekEnd := weekStart.AddDate(0, 0, 6)
 	totals := map[string]time.Duration{}
-	for _, bucket := range s.localStorage.ListBuckets() {
-		if !strings.HasPrefix(bucket, domainBucketPrefix) {
-			continue
-		}
-		t, err := time.ParseInLocation(TruncatedToHour, strings.TrimPrefix(bucket, domainBucketPrefix), time.Local)
+	for _, hour := range s.domainHours() {
+		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
 		if err != nil || t.Before(weekStart) || !t.Before(weekEnd.AddDate(0, 0, 1)) {
 			continue
 		}
-		for _, site := range mapDomainsToAppInfos(s.localStorage.GetValues(bucket)) {
+		for _, site := range s.getDomainStatisticsHour(hour) {
 			totals[site.Identity] += site.Duration
 		}
 	}
 	timestamp := weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay)
 	return domainStatisticsResponse(totals, timestamp, weekShift)
+}
+
+func (s *StatsStorage) getDomainStatisticsHour(hour string) types.AppInfos {
+	totals := map[string]time.Duration{}
+	for _, site := range mapDomainsToAppInfos(s.localStorage.GetValues(domainBucketPrefix + hour)) {
+		totals[site.Identity] += site.Duration
+	}
+	for _, site := range mapContextualDomainsToAppInfos(s.localStorage.GetValues(contextualDomainBucketPrefix + hour)) {
+		totals[site.Identity] += site.Duration
+	}
+	stats := make(types.AppInfos, 0, len(totals))
+	for domain, duration := range totals {
+		stats = append(stats, types.AppInfo{Identity: domain, Duration: duration})
+	}
+	stats.SortByDurationDesc()
+	return stats
+}
+
+func mapContextualDomainsToAppInfos(values map[string]string) types.AppInfos {
+	totals := map[string]time.Duration{}
+	for key, raw := range values {
+		var usage storedDomainUsage
+		if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+			fmt.Printf("domain: corrupt contextual value %s: %s, skipping\n", key, err)
+			continue
+		}
+		if !ShouldTrackApplication(usage.ActiveApplication) ||
+			!strings.EqualFold(usage.ActiveApplication, usage.BrowserBundleID) ||
+			!ShouldTrackDomain(usage.Domain) || usage.Millis <= 0 {
+			continue
+		}
+		totals[usage.Domain] += time.Duration(usage.Millis) * time.Millisecond
+	}
+	stats := make(types.AppInfos, 0, len(totals))
+	for domain, duration := range totals {
+		stats = append(stats, types.AppInfo{Identity: domain, Duration: duration})
+	}
+	return stats
+}
+
+func (s *StatsStorage) domainHours() []string {
+	seen := map[string]bool{}
+	for _, bucket := range s.localStorage.ListBuckets() {
+		for _, prefix := range []string{domainBucketPrefix, contextualDomainBucketPrefix} {
+			if !strings.HasPrefix(bucket, prefix) {
+				continue
+			}
+			hour := strings.TrimPrefix(bucket, prefix)
+			if _, err := time.ParseInLocation(TruncatedToHour, hour, time.Local); err == nil {
+				seen[hour] = true
+			}
+		}
+	}
+	hours := make([]string, 0, len(seen))
+	for hour := range seen {
+		hours = append(hours, hour)
+	}
+	return hours
 }
 
 func domainStatisticsResponse(totals map[string]time.Duration, timestamp string, shift int) *types.AppInfoResponse {
@@ -195,18 +307,36 @@ func (s *StatsStorage) NearestShift(fromShift int, older bool) (int, bool) {
 	return s.nearestHourShift("", fromShift, older)
 }
 
-// NearestDomainShift — как NearestShift, но по часовым bucket'ам доменов (dom/).
+// NearestDomainShift is like NearestShift, but includes both legacy and
+// contextual domain buckets.
 func (s *StatsStorage) NearestDomainShift(fromShift int, older bool) (int, bool) {
-	return s.nearestHourShift(domainBucketPrefix, fromShift, older)
+	currentHour := time.Now().Truncate(time.Hour)
+	best := -1
+	for _, hour := range s.domainHours() {
+		if len(s.getDomainStatisticsHour(hour)) == 0 {
+			continue
+		}
+		t, _ := time.ParseInLocation(TruncatedToHour, hour, time.Local)
+		shift := int(currentHour.Sub(t.Truncate(time.Hour)) / time.Hour)
+		if shift < 0 {
+			continue
+		}
+		if older && shift > fromShift && (best == -1 || shift < best) {
+			best = shift
+		}
+		if !older && shift < fromShift && shift > best {
+			best = shift
+		}
+	}
+	return best, best != -1
 }
 
 func (s *StatsStorage) NearestDomainDayShift(fromShift int, older bool) (int, bool) {
 	haveDay := map[string]bool{}
-	for _, bucket := range s.localStorage.ListBuckets() {
-		if !strings.HasPrefix(bucket, domainBucketPrefix) || len(mapDomainsToAppInfos(s.localStorage.GetValues(bucket))) == 0 {
+	for _, hour := range s.domainHours() {
+		if len(s.getDomainStatisticsHour(hour)) == 0 {
 			continue
 		}
-		hour := strings.TrimPrefix(bucket, domainBucketPrefix)
 		if _, err := time.ParseInLocation(TruncatedToHour, hour, time.Local); err != nil {
 			continue
 		}
@@ -231,11 +361,10 @@ func (s *StatsStorage) NearestDomainDayShift(fromShift int, older bool) (int, bo
 func (s *StatsStorage) NearestDomainWeekShift(fromShift int, older bool) (int, bool) {
 	currentWeek := activityWeekStart(time.Now())
 	seen := map[int]bool{}
-	for _, bucket := range s.localStorage.ListBuckets() {
-		if !strings.HasPrefix(bucket, domainBucketPrefix) || len(mapDomainsToAppInfos(s.localStorage.GetValues(bucket))) == 0 {
+	for _, hour := range s.domainHours() {
+		if len(s.getDomainStatisticsHour(hour)) == 0 {
 			continue
 		}
-		hour := strings.TrimPrefix(bucket, domainBucketPrefix)
 		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
 		if err != nil {
 			continue

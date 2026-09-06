@@ -97,8 +97,8 @@ func TestRenderDailyRich(t *testing.T) {
 	if got := table.Cells[1][0].Text.PlainText; got != "Terminal" {
 		t.Fatalf("first app = %q, want duration-sorted Terminal", got)
 	}
-	if got := table.Cells[3][1].Text.PlainText; got != "7m 0s" {
-		t.Fatalf("total = %q, want 7m 0s", got)
+	if got := table.Cells[3][1].Text.PlainText; got != "7m\u00a00s" {
+		t.Fatalf("total = %q, want one-line 7m 0s", got)
 	}
 	buttons := message.Blocks[2].InputRichBlockButtons
 	if buttons == nil || len(buttons.Buttons) != 2 {
@@ -313,6 +313,9 @@ func TestFormatActivityDuration(t *testing.T) {
 func TestCompactDurationAndReportTimestamp(t *testing.T) {
 	if got := formatCompactDuration(3*time.Hour + 10*time.Minute + 11731*time.Millisecond); got != "3h 10m 11.731s" {
 		t.Fatalf("compact duration = %q", got)
+	}
+	if got := formatTableDuration(35*time.Minute + 33*time.Second); got != "35m\u00a033s" {
+		t.Fatalf("table duration = %q, want non-breaking space", got)
 	}
 	tests := map[string]string{
 		"2026-08-24":                    "24.08",

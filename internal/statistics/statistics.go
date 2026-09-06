@@ -122,8 +122,8 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				request.ResponseChan <- resp
 
 			case types.DomainEvent:
-				tick := command.(types.DomainTick)
-				storage.AddDomainTime(tick.Domain, tick.Millis)
+				tick := alignDomainTick(command.(types.DomainTick), activeApplication, activatedAt)
+				storage.AddDomainSample(activeApplication, tick)
 
 			case types.AppInfoCommand:
 				query := command.(types.AppInfoQuery)
@@ -148,4 +148,20 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 			}
 		}
 	}
+}
+
+// alignDomainTick prevents the first poll after an application switch from
+// assigning time from before the browser became active to the new domain.
+func alignDomainTick(tick types.DomainTick, activeApplication string, activatedAt time.Time) types.DomainTick {
+	if tick.At.IsZero() || !strings.EqualFold(activeApplication, tick.BrowserBundleID) {
+		return tick
+	}
+	activeMillis := tick.At.Sub(activatedAt).Milliseconds()
+	if activeMillis < 0 {
+		activeMillis = 0
+	}
+	if tick.Millis > activeMillis {
+		tick.Millis = activeMillis
+	}
+	return tick
 }

@@ -117,11 +117,17 @@ func (sc NewAppEvent) Type() AppCommandType {
 	return Event
 }
 
-// DomainTick сообщает, что за истекший интервал был активен домен Domain в течение
-// Millis миллисекунд (или пустой домен, если браузер не активен — тик игнорируется).
+// DomainTick records one browser observation. Empty/internal tabs and session
+// context are retained in raw storage and filtered only while building reports.
 type DomainTick struct {
-	Domain string
-	Millis int64
+	At              time.Time
+	BrowserBundleID string
+	Domain          string
+	// RawMillis is the complete wall-clock gap since the preceding poll. Millis
+	// is the measured portion attributable to this observation; long sleep or
+	// scheduling gaps are retained in RawMillis but not credited as activity.
+	RawMillis int64
+	Millis    int64
 }
 
 func (dt DomainTick) Type() AppCommandType {
