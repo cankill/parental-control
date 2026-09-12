@@ -163,3 +163,22 @@ func TestNearestActivityShiftByPeriod(t *testing.T) {
 		}
 	})
 }
+
+func TestDailyActivityNavigationUsesPresenceDayIndexWithoutReadingHours(t *testing.T) {
+	storage := activityStorage(t)
+	now := time.Now()
+	storage.AddPresenceSample(types.PresenceSample{
+		At: now.AddDate(0, 0, -3), Kind: types.PresencePresent, Seconds: 60,
+	})
+	storage.AddPresenceSample(types.PresenceSample{
+		At: now.AddDate(0, 0, -1), Kind: types.PresencePresent, Seconds: 60,
+	})
+
+	older, hasOlder, newer, hasNewer := storage.ActivityNavigation(types.ActivityDaily, 2)
+	if !hasOlder || older != 3 || !hasNewer || newer != 1 {
+		t.Fatalf("daily navigation = older(%d,%v) newer(%d,%v)", older, hasOlder, newer, hasNewer)
+	}
+	if storage.index.presenceHoursScanned {
+		t.Fatal("daily navigation unnecessarily read presence samples")
+	}
+}

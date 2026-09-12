@@ -170,8 +170,7 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				started := time.Now()
 				request := command.(types.ActivityRequest)
 				resp := storage.GetActivity(request.Period, request.Shift)
-				resp.OlderShift, resp.HasOlder = storage.NearestActivityShift(request.Period, request.Shift, true)
-				resp.NewerShift, resp.HasNewer = storage.NearestActivityShift(request.Period, request.Shift, false)
+				resp.OlderShift, resp.HasOlder, resp.NewerShift, resp.HasNewer = storage.ActivityNavigation(request.Period, request.Shift)
 				logStatisticsQuery("activity-"+activityPeriodName(request.Period), request.Shift, started, storage.CacheMetrics())
 				request.ResponseChan <- resp
 

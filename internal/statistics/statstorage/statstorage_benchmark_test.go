@@ -52,6 +52,20 @@ func BenchmarkHistoricalReportsYear(b *testing.B) {
 			_ = storage.GetActivity(types.ActivityWeekly, 20)
 		}
 	})
+	b.Run("ActivityDayNavigation", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			_, _, _, _ = storage.ActivityNavigation(types.ActivityDaily, 180)
+		}
+	})
+	b.Run("ActivityCurrentDayAfterWrite", func(b *testing.B) {
+		b.ReportAllocs()
+		now := time.Now().Truncate(time.Minute)
+		for i := range b.N {
+			storage.AddActivity([]types.ActivitySample{{At: now.Add(time.Duration(i) * time.Nanosecond), Kind: types.ActivityBoth}})
+			_ = storage.GetActivity(types.ActivityDaily, 0)
+		}
+	})
 	b.Run("ApplicationsDayNavigation", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
@@ -80,6 +94,15 @@ func newYearBenchmarkStorage(b *testing.B) *StatsStorage {
 	if err != nil {
 		b.Fatal(err)
 	}
+	presenceJSON := func(at time.Time) string {
+		data, marshalErr := json.Marshal([]storedPresenceSample{{
+			At: at.UnixNano(), Kind: types.PresencePresent, Seconds: 60, MissThreshold: 3,
+		}})
+		if marshalErr != nil {
+			b.Fatal(marshalErr)
+		}
+		return string(data)
+	}
 
 	for day := 0; day < 365; day++ {
 		date := start.AddDate(0, 0, day)
@@ -91,6 +114,7 @@ func newYearBenchmarkStorage(b *testing.B) *StatsStorage {
 			storage.localStorage.SaveValue(domainBucketPrefix+hourName, "newtab", "600000")
 			storage.localStorage.SaveValue(activityBucketPrefix+hourName, "00", string(activityJSON))
 		}
+		storage.localStorage.SaveValue(presenceBucketPrefix+date.Format(TruncatedToDay), "09", presenceJSON(date.Add(9*time.Hour)))
 	}
 	return storage
 }

@@ -62,24 +62,36 @@ func (c *reportCache) remove(keys ...string) {
 }
 
 type periodIndex struct {
-	appHours       map[string]struct{}
-	domainHours    map[string]struct{}
-	activityHours  map[string]struct{}
-	presenceDays   map[string]struct{}
-	availableApps  map[string]struct{}
-	availableSites map[string]struct{}
-	appsScanned    bool
-	sitesScanned   bool
+	appHours               map[string]struct{}
+	domainHours            map[string]struct{}
+	activityHours          map[string]struct{}
+	presenceDays           map[string]struct{}
+	availableApps          map[string]struct{}
+	availableSites         map[string]struct{}
+	availablePresenceHours map[string]struct{}
+	activityHourTotals     map[string]int
+	activityDayTotals      map[string]int
+	activityWeekTotals     map[string]int
+	activityPeaks          map[types.ActivityPeriod]int
+	appsScanned            bool
+	sitesScanned           bool
+	presenceHoursScanned   bool
+	activityTotalsReady    bool
 }
 
 func newPeriodIndex(buckets []string) *periodIndex {
 	index := &periodIndex{
-		appHours:       make(map[string]struct{}),
-		domainHours:    make(map[string]struct{}),
-		activityHours:  make(map[string]struct{}),
-		presenceDays:   make(map[string]struct{}),
-		availableApps:  make(map[string]struct{}),
-		availableSites: make(map[string]struct{}),
+		appHours:               make(map[string]struct{}),
+		domainHours:            make(map[string]struct{}),
+		activityHours:          make(map[string]struct{}),
+		presenceDays:           make(map[string]struct{}),
+		availableApps:          make(map[string]struct{}),
+		availableSites:         make(map[string]struct{}),
+		availablePresenceHours: make(map[string]struct{}),
+		activityHourTotals:     make(map[string]int),
+		activityDayTotals:      make(map[string]int),
+		activityWeekTotals:     make(map[string]int),
+		activityPeaks:          make(map[types.ActivityPeriod]int),
 	}
 	for _, bucket := range buckets {
 		index.addBucket(bucket)
@@ -182,19 +194,22 @@ func (s *StatsStorage) noteContextualDomainWrite(hour string, usage storedDomain
 	}
 }
 
-func (s *StatsStorage) noteActivityWrite(hour string) {
+func (s *StatsStorage) noteActivityWrite(hour string, seconds int) {
 	s.noteBucket(activityBucketPrefix + hour)
 	s.removeCached(cachePeriodKeys("activity", hour)...)
-	s.removeCached("activity:peak:hourly", "activity:peak:daily", "activity:peak:weekly")
+	if s.index != nil && s.index.activityTotalsReady && seconds > 0 {
+		s.index.addActivitySeconds(hour, seconds)
+	}
 }
 
-func (s *StatsStorage) notePresenceWrite(day string) {
+func (s *StatsStorage) notePresenceWrite(at time.Time, kind types.PresenceKind) {
+	day := at.Format(TruncatedToDay)
 	s.noteBucket(presenceBucketPrefix + day)
-	date, err := time.ParseInLocation(TruncatedToDay, day, time.Local)
-	if err != nil {
-		return
+	s.removeCached("presence:day:"+day, "presence:week:"+activityWeekStart(at).Format(TruncatedToDay))
+	s.removeCached(cachePeriodKeys("activity-presence", at.Format(TruncatedToHour))...)
+	if s.index != nil && s.index.presenceHoursScanned && kind == types.PresencePresent {
+		s.index.availablePresenceHours[at.Format(TruncatedToHour)] = struct{}{}
 	}
-	s.removeCached("presence:day:"+day, "presence:week:"+activityWeekStart(date).Format(TruncatedToDay))
 }
 
 func (s *StatsStorage) appHours() map[string]struct{} {
@@ -235,6 +250,45 @@ func (s *StatsStorage) availableDomainHours() map[string]struct{} {
 	return index.availableSites
 }
 
+func (s *StatsStorage) availablePresenceHours() map[string]struct{} {
+	index := s.ensureIndex()
+	if !index.presenceHoursScanned {
+		for day := range index.presenceDays {
+			for _, sample := range resolvePresenceSamples(s.presenceDaySamples(day)) {
+				if sample.Kind == types.PresencePresent {
+					index.availablePresenceHours[sample.At.Format(TruncatedToHour)] = struct{}{}
+				}
+			}
+		}
+		index.presenceHoursScanned = true
+	}
+	return index.availablePresenceHours
+}
+
+func (i *periodIndex) addActivitySeconds(hour string, seconds int) {
+	if seconds <= 0 {
+		return
+	}
+	at, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
+	if err != nil {
+		return
+	}
+	day := at.Format(TruncatedToDay)
+	week := activityWeekStart(at).Format(TruncatedToDay)
+	i.activityHourTotals[hour] += seconds
+	i.activityDayTotals[day] += seconds
+	i.activityWeekTotals[week] += seconds
+	if i.activityHourTotals[hour] > i.activityPeaks[types.ActivityHourly] {
+		i.activityPeaks[types.ActivityHourly] = i.activityHourTotals[hour]
+	}
+	if i.activityDayTotals[day] > i.activityPeaks[types.ActivityDaily] {
+		i.activityPeaks[types.ActivityDaily] = i.activityDayTotals[day]
+	}
+	if i.activityWeekTotals[week] > i.activityPeaks[types.ActivityWeekly] {
+		i.activityPeaks[types.ActivityWeekly] = i.activityWeekTotals[week]
+	}
+}
+
 func cloneAppInfos(source types.AppInfos) types.AppInfos {
 	return append(types.AppInfos(nil), source...)
 }
@@ -267,6 +321,21 @@ func (s *StatsStorage) cachedActivityBuckets(key string) ([]types.ActivityBucket
 
 func (s *StatsStorage) storeActivityBuckets(key string, buckets []types.ActivityBucket) {
 	s.ensureCache().set(key, cloneActivityBuckets(buckets))
+}
+
+func clonePresenceIntervals(source []types.PresenceInterval) []types.PresenceInterval {
+	return append([]types.PresenceInterval(nil), source...)
+}
+
+func (s *StatsStorage) loadPresenceIntervals(key string, load func() []types.PresenceInterval) []types.PresenceInterval {
+	if value, ok := s.ensureCache().get(key); ok {
+		if intervals, valid := value.([]types.PresenceInterval); valid {
+			return clonePresenceIntervals(intervals)
+		}
+	}
+	intervals := load()
+	s.ensureCache().set(key, clonePresenceIntervals(intervals))
+	return intervals
 }
 
 func (s *StatsStorage) loadActivityBuckets(key string, cacheable bool, load func() []types.ActivityBucket) []types.ActivityBucket {

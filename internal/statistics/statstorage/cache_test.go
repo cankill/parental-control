@@ -77,6 +77,57 @@ func TestActivityCacheInvalidatesBucketsAndPeak(t *testing.T) {
 	}
 }
 
+func TestCurrentActivityAndPresenceAreCachedUntilNextWrite(t *testing.T) {
+	storage := newTestStorage(t)
+	now := time.Now().Truncate(time.Minute)
+	storage.AddActivity([]types.ActivitySample{{At: now, Kind: types.ActivityKeyboard}})
+	storage.AddPresenceSample(types.PresenceSample{At: now, Kind: types.PresencePresent, Seconds: 60})
+
+	first := storage.GetActivity(types.ActivityDaily, 0)
+	beforeHit := storage.CacheMetrics()
+	second := storage.GetActivity(types.ActivityDaily, 0)
+	afterHit := storage.CacheMetrics()
+	if first.Buckets[now.Hour()].ActiveSeconds() != 1 || len(first.Presence) != 1 || len(second.Presence) != 1 {
+		t.Fatalf("initial current activity = bucket %+v, presence %+v", first.Buckets[now.Hour()], first.Presence)
+	}
+	if afterHit.Hits < beforeHit.Hits+2 {
+		t.Fatalf("current activity did not reuse both caches: before=%+v after=%+v", beforeHit, afterHit)
+	}
+
+	storage.AddActivity([]types.ActivitySample{{At: now.Add(time.Second), Kind: types.ActivityMouse}})
+	storage.AddPresenceSample(types.PresenceSample{At: now.Add(time.Minute), Kind: types.PresencePresent, Seconds: 60})
+	updated := storage.GetActivity(types.ActivityDaily, 0)
+	if updated.Buckets[now.Hour()].ActiveSeconds() != 2 {
+		t.Fatalf("current activity cache was stale: %+v", updated.Buckets[now.Hour()])
+	}
+	if len(updated.Presence) != 1 || !updated.Presence[0].End.Equal(now.Add(2*time.Minute)) {
+		t.Fatalf("current presence cache was stale: %+v", updated.Presence)
+	}
+}
+
+func TestActivityPeakTotalsUpdateIncrementally(t *testing.T) {
+	storage := newTestStorage(t)
+	now := time.Now().Truncate(time.Hour)
+	storage.AddActivity([]types.ActivitySample{{At: now, Kind: types.ActivityKeyboard}})
+	if got := storage.GetActivity(types.ActivityDaily, 0).PeakSeconds; got != 1 {
+		t.Fatalf("initial peak = %d, want 1", got)
+	}
+	if !storage.index.activityTotalsReady {
+		t.Fatal("activity totals index was not initialized")
+	}
+
+	storage.AddActivity([]types.ActivitySample{
+		{At: now.Add(time.Second), Kind: types.ActivityMouse},
+		{At: now.Add(2 * time.Second), Kind: types.ActivityBoth},
+	})
+	if got := storage.GetActivity(types.ActivityDaily, 0).PeakSeconds; got != 3 {
+		t.Fatalf("incremental peak = %d, want 3", got)
+	}
+	if got := storage.index.activityDayTotals[now.Format(TruncatedToDay)]; got != 3 {
+		t.Fatalf("indexed day total = %d, want 3", got)
+	}
+}
+
 func TestPeriodIndexLearnsWritesAfterInitialScan(t *testing.T) {
 	storage := newTestStorage(t)
 	if _, ok := storage.NearestDayShift(0, true); ok {

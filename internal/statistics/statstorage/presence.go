@@ -59,7 +59,7 @@ func (s *StatsStorage) AddPresenceSample(sample types.PresenceSample) {
 		return
 	}
 	s.localStorage.SaveValue(bucket, key, string(data))
-	s.notePresenceWrite(day)
+	s.notePresenceWrite(sample.At, sample.Kind)
 }
 
 func (s *StatsStorage) GetPresence(period types.ActivityPeriod, shift int) *types.PresenceResponse {

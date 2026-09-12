@@ -406,6 +406,7 @@ func (s *StatsStorage) NearestDomainWeekShift(fromShift int, older bool) (int, b
 
 // AddActivity stores one active second in its local five-minute bucket.
 func (s *StatsStorage) AddActivity(samples []types.ActivitySample) {
+	writtenByHour := make(map[string]int)
 	for _, sample := range samples {
 		minute := sample.At.Minute() / 5 * 5
 		hour := sample.At.Format(TruncatedToHour)
@@ -429,7 +430,10 @@ func (s *StatsStorage) AddActivity(samples []types.ActivitySample) {
 		}
 		data, _ := json.Marshal(bucket)
 		s.localStorage.SaveValue(bucketName, key, string(data))
-		s.noteActivityWrite(hour)
+		writtenByHour[hour]++
+	}
+	for hour, seconds := range writtenByHour {
+		s.noteActivityWrite(hour, seconds)
 	}
 }
 
@@ -446,7 +450,7 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 		resp.PeriodEnd = resp.PeriodStart.AddDate(0, 0, 1)
 		resp.TimeStamp = day.Format(TruncatedToDay)
 		resp.BucketSeconds = 60 * 60
-		resp.Buckets = s.loadActivityBuckets("activity:day:"+resp.TimeStamp, finalizedDay(resp.TimeStamp), func() []types.ActivityBucket {
+		resp.Buckets = s.loadActivityBuckets("activity:day:"+resp.TimeStamp, true, func() []types.ActivityBucket {
 			buckets := make([]types.ActivityBucket, 24)
 			for hour := range buckets {
 				hourName := fmt.Sprintf("%sT%02d", resp.TimeStamp, hour)
@@ -461,7 +465,7 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 		resp.PeriodEnd = weekStart.AddDate(0, 0, 7)
 		resp.TimeStamp = weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay)
 		resp.BucketSeconds = 24 * 60 * 60
-		resp.Buckets = s.loadActivityBuckets("activity:week:"+weekStart.Format(TruncatedToDay), finalizedWeek(weekStart), func() []types.ActivityBucket {
+		resp.Buckets = s.loadActivityBuckets("activity:week:"+weekStart.Format(TruncatedToDay), true, func() []types.ActivityBucket {
 			buckets := make([]types.ActivityBucket, 7)
 			for day := range buckets {
 				date := weekStart.AddDate(0, 0, day).Format(TruncatedToDay)
@@ -479,11 +483,25 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 		hour := resp.PeriodStart.Format(TruncatedToHour)
 		resp.TimeStamp = hour
 		resp.BucketSeconds = 5 * 60
-		resp.Buckets = s.loadActivityBuckets("activity:hour:"+hour, finalizedHour(hour), func() []types.ActivityBucket {
+		resp.Buckets = s.loadActivityBuckets("activity:hour:"+hour, true, func() []types.ActivityBucket {
 			return s.readActivityHourUncached(hour)
 		})
 	}
-	resp.Presence = s.presenceIntervals(resp.PeriodStart, resp.PeriodEnd)
+	presencePeriod := "hour"
+	if resp.Period == types.ActivityDaily {
+		presencePeriod = "day"
+	} else if resp.Period == types.ActivityWeekly {
+		presencePeriod = "week"
+	}
+	presenceKey := "activity-presence:" + presencePeriod + ":"
+	if resp.Period == types.ActivityHourly {
+		presenceKey += resp.PeriodStart.Format(TruncatedToHour)
+	} else {
+		presenceKey += resp.PeriodStart.Format(TruncatedToDay)
+	}
+	resp.Presence = s.loadPresenceIntervals(presenceKey, func() []types.PresenceInterval {
+		return s.presenceIntervals(resp.PeriodStart, resp.PeriodEnd)
+	})
 	resp.PeakSeconds = s.maxActivityPeriodSeconds(resp.Period)
 	return resp
 }
@@ -491,35 +509,14 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 // maxActivityPeriodSeconds returns the activity record for the requested
 // granularity across all stored periods (hour, day, or Monday-Sunday week).
 func (s *StatsStorage) maxActivityPeriodSeconds(period types.ActivityPeriod) int {
-	cacheKey := "activity:peak:" + activityCachePeriodName(period)
-	if value, ok := s.ensureCache().get(cacheKey); ok {
-		if maximum, valid := value.(int); valid {
-			return maximum
+	index := s.ensureIndex()
+	if !index.activityTotalsReady {
+		for hour := range index.activityHours {
+			index.addActivitySeconds(hour, sumActivityBuckets(s.readActivityHourUncached(hour)).ActiveSeconds())
 		}
+		index.activityTotalsReady = true
 	}
-	totals := map[string]int{}
-	for hour := range s.activityHours() {
-		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
-		if err != nil {
-			continue
-		}
-		key := hour
-		switch period {
-		case types.ActivityDaily:
-			key = t.Format(TruncatedToDay)
-		case types.ActivityWeekly:
-			key = activityWeekStart(t).Format(TruncatedToDay)
-		}
-		totals[key] += sumActivityBuckets(s.readActivityHourUncached(hour)).ActiveSeconds()
-	}
-	maximum := 0
-	for _, total := range totals {
-		if total > maximum {
-			maximum = total
-		}
-	}
-	s.ensureCache().set(cacheKey, maximum)
-	return maximum
+	return index.activityPeaks[period]
 }
 
 func (s *StatsStorage) readActivityHour(hour string) []types.ActivityBucket {
@@ -569,10 +566,22 @@ func activityDayIndex(t time.Time) int64 {
 }
 
 func (s *StatsStorage) NearestActivityShift(period types.ActivityPeriod, fromShift int, older bool) (int, bool) {
+	olderShift, hasOlder, newerShift, hasNewer := s.ActivityNavigation(period, fromShift)
+	if older {
+		return olderShift, hasOlder
+	}
+	return newerShift, hasNewer
+}
+
+// ActivityNavigation finds both neighbours in one pass. Day and week
+// navigation uses the presence day index directly; only hourly navigation
+// needs the lazily built presence-hour index.
+func (s *StatsStorage) ActivityNavigation(period types.ActivityPeriod, fromShift int) (olderShift int, hasOlder bool, newerShift int, hasNewer bool) {
 	now := time.Now()
 	currentHour := now.Truncate(time.Hour)
 	currentWeek := activityWeekStart(now)
-	best := -1
+	olderShift = -1
+	newerShift = -1
 	consider := func(t time.Time) {
 		var shift int
 		switch period {
@@ -586,11 +595,11 @@ func (s *StatsStorage) NearestActivityShift(period types.ActivityPeriod, fromShi
 		if shift < 0 {
 			return
 		}
-		if older && shift > fromShift && (best == -1 || shift < best) {
-			best = shift
+		if shift > fromShift && (olderShift == -1 || shift < olderShift) {
+			olderShift = shift
 		}
-		if !older && shift < fromShift && shift > best {
-			best = shift
+		if shift < fromShift && shift > newerShift {
+			newerShift = shift
 		}
 	}
 	for hour := range s.activityHours() {
@@ -599,14 +608,22 @@ func (s *StatsStorage) NearestActivityShift(period types.ActivityPeriod, fromShi
 			consider(t)
 		}
 	}
-	for day := range s.presenceDays() {
-		for _, sample := range resolvePresenceSamples(s.presenceDaySamples(day)) {
-			if sample.Kind == types.PresencePresent {
-				consider(sample.At)
+	if period == types.ActivityHourly {
+		for hour := range s.availablePresenceHours() {
+			t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
+			if err == nil {
+				consider(t)
+			}
+		}
+	} else {
+		for day := range s.presenceDays() {
+			t, err := time.ParseInLocation(TruncatedToDay, day, time.Local)
+			if err == nil {
+				consider(t)
 			}
 		}
 	}
-	return best, best != -1
+	return olderShift, olderShift != -1, newerShift, newerShift != -1
 }
 
 func (s *StatsStorage) nearestHourShift(fromShift int, older bool) (int, bool) {
