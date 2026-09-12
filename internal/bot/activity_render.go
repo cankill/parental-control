@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"io"
 	"math"
 	"parental-control/internal/lib/types"
 	"sort"
@@ -454,6 +455,7 @@ func activityCaption(resp *types.ActivityResponse) models.RichText {
 
 func renderNoActivity(resp *types.ActivityResponse) models.InputRichMessage {
 	blocks := []models.InputRichBlock{
+		activityPeriodButtons(),
 		richHeading(activityPeriodLabel(resp.Period) + ": " + formatReportTimestamp(resp.TimeStamp)),
 		richParagraph("No Activity"),
 	}
@@ -461,6 +463,26 @@ func renderNoActivity(resp *types.ActivityResponse) models.InputRichMessage {
 		blocks = append(blocks, richButtons(buttons...))
 	}
 	return models.InputRichMessage{Blocks: blocks}
+}
+
+func renderActivityPhoto(reader io.Reader, resp *types.ActivityResponse) models.InputRichMessage {
+	message := renderPhotoWithRichCaption(reader, "activity.png", activityCaption(resp), activityButtons(resp)...)
+	message.Blocks = append([]models.InputRichBlock{activityPeriodButtons()}, message.Blocks...)
+	return message
+}
+
+func renderActivityNotice(title, text string) models.InputRichMessage {
+	message := renderNotice(title, text)
+	message.Blocks = append([]models.InputRichBlock{activityPeriodButtons()}, message.Blocks...)
+	return message
+}
+
+func activityPeriodButtons() models.InputRichBlock {
+	return richButtons(
+		richCallbackButton("Hour", "activity-hourly"),
+		richCallbackButton("Day", "activity-daily"),
+		richCallbackButton("Week", "activity-weekly"),
+	)
 }
 
 func activityButtons(resp *types.ActivityResponse) []models.RichMessageButton {

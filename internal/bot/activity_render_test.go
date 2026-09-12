@@ -261,18 +261,44 @@ func TestNoActivityMessageKeepsPeriodAndNavigation(t *testing.T) {
 	}
 
 	message := renderNoActivity(response)
-	if len(message.Blocks) != 3 {
-		t.Fatalf("empty activity blocks = %d, want heading, message, and navigation", len(message.Blocks))
+	if len(message.Blocks) != 4 {
+		t.Fatalf("empty activity blocks = %d, want period selector, heading, message, and navigation", len(message.Blocks))
 	}
-	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Hour: 05.09 14:00" {
+	periodButtons := message.Blocks[0].InputRichBlockButtons.Buttons
+	if len(periodButtons) != 3 || periodButtons[0].CallbackData != "\factivity-hourly" ||
+		periodButtons[1].CallbackData != "\factivity-daily" || periodButtons[2].CallbackData != "\factivity-weekly" {
+		t.Fatalf("activity period buttons = %#v", periodButtons)
+	}
+	if got := message.Blocks[1].InputRichBlockSectionHeading.Text.PlainText; got != "Hour: 05.09 14:00" {
 		t.Fatalf("empty activity heading = %q", got)
 	}
-	if got := message.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "No Activity" {
+	if got := message.Blocks[2].InputRichBlockParagraph.Text.PlainText; got != "No Activity" {
 		t.Fatalf("empty activity text = %q", got)
 	}
-	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
+	buttons := message.Blocks[3].InputRichBlockButtons.Buttons
 	if len(buttons) != 1 || buttons[0].CallbackData != "\factivity-prev|0:3" {
 		t.Fatalf("empty activity navigation = %#v", buttons)
+	}
+}
+
+func TestActivityPhotoKeepsPeriodSelectorAboveChart(t *testing.T) {
+	response := &types.ActivityResponse{
+		Period: types.ActivityDaily, TimeStamp: "2026-09-05",
+		Buckets: make([]types.ActivityBucket, 24), HasOlder: true, OlderShift: 2,
+	}
+	message := renderActivityPhoto(bytes.NewReader([]byte("png")), response)
+	if len(message.Blocks) != 3 {
+		t.Fatalf("activity blocks = %d, want period selector, photo, and navigation", len(message.Blocks))
+	}
+	if message.Blocks[0].InputRichBlockButtons == nil || message.Blocks[1].InputRichBlockPhoto == nil || message.Blocks[2].InputRichBlockButtons == nil {
+		t.Fatalf("activity block order = %#v", message.Blocks)
+	}
+	periodButtons := message.Blocks[0].InputRichBlockButtons.Buttons
+	if len(periodButtons) != 3 || periodButtons[2].Text.PlainText != "Week" {
+		t.Fatalf("activity period buttons = %#v", periodButtons)
+	}
+	if buttons := message.Blocks[2].InputRichBlockButtons.Buttons; len(buttons) != 1 || buttons[0].CallbackData != "\factivity-prev|1:2" {
+		t.Fatalf("activity navigation = %#v", buttons)
 	}
 }
 

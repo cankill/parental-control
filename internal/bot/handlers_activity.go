@@ -12,7 +12,7 @@ const inputMonitoringHelp = "Activity tracking needs Input Monitoring permission
 const inputMonitoringAlert = "Input Monitoring permission is required. Enable it in System Settings, then restart ParentControl."
 
 func (h *handlerRegistry) registerActivityHandlers() {
-	h.command("activity", h.sendActivityMenu)
+	h.command("activity", h.sendCurrentActivity)
 	h.callback("activity-hourly", h.selectActivityPeriod(types.ActivityHourly))
 	h.callback("activity-daily", h.selectActivityPeriod(types.ActivityDaily))
 	h.callback("activity-weekly", h.selectActivityPeriod(types.ActivityWeekly))
@@ -20,8 +20,8 @@ func (h *handlerRegistry) registerActivityHandlers() {
 	h.callback("activity-next", h.navigateActivity)
 }
 
-func (h *handlerRegistry) sendActivityMenu(c *updateContext) error {
-	return c.SendRichMessage(renderActivityMenu())
+func (h *handlerRegistry) sendCurrentActivity(c *updateContext) error {
+	return h.sendActivity(c, types.ActivityHourly, 0)
 }
 
 func (h *handlerRegistry) selectActivityPeriod(period types.ActivityPeriod) handlerFunc {
@@ -36,20 +36,20 @@ func (h *handlerRegistry) selectActivityPeriod(period types.ActivityPeriod) hand
 func (h *handlerRegistry) sendActivity(c *updateContext, period types.ActivityPeriod, shift int) error {
 	if !activity.PreflightAccess() {
 		activity.RequestAccessOnce()
-		return c.RespondRichMessage(renderNotice("Input Monitoring required", inputMonitoringHelp))
+		return c.RespondRichMessage(renderActivityNotice("Input Monitoring required", inputMonitoringHelp))
 	}
 	resp, err := h.stats.activity(period, shift)
 	if err != nil {
-		return c.RespondRichMessage(renderNotice("Activity unavailable", "ParentControl is shutting down."))
+		return c.RespondRichMessage(renderActivityNotice("Activity unavailable", "ParentControl is shutting down."))
 	}
 	if total, _ := activityMetrics(activityBuckets(resp)); total == 0 && len(resp.Presence) == 0 {
 		return c.RespondRichMessage(renderNoActivity(resp))
 	}
 	data, err := renderActivityPNG(resp)
 	if err != nil {
-		return c.RespondRichMessage(renderNotice("Activity unavailable", "Could not render the activity chart."))
+		return c.RespondRichMessage(renderActivityNotice("Activity unavailable", "Could not render the activity chart."))
 	}
-	return c.RespondRichMessage(renderPhotoWithRichCaption(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
+	return c.RespondRichMessage(renderActivityPhoto(bytes.NewReader(data), resp))
 }
 
 func (h *handlerRegistry) navigateActivity(c *updateContext) error {
@@ -71,7 +71,7 @@ func (h *handlerRegistry) navigateActivity(c *updateContext) error {
 	if err != nil {
 		return c.AnswerCallback("Activity unavailable", false)
 	}
-	return c.EditRichMessage(renderPhotoWithRichCaption(bytes.NewReader(data), "activity.png", activityCaption(resp), activityButtons(resp)...))
+	return c.EditRichMessage(renderActivityPhoto(bytes.NewReader(data), resp))
 }
 
 func parseActivityTarget(data string) (types.ActivityPeriod, int, bool) {
