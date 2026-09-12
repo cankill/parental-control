@@ -512,18 +512,6 @@ func TestRenderVideoAttachment(t *testing.T) {
 	}
 }
 
-func TestRenderPresenceEvents(t *testing.T) {
-	since := time.Date(2026, 9, 7, 9, 5, 0, 0, time.Local)
-	absent := renderPresenceEvent(presence.Event{Kind: presence.EventAbsent, Since: since, At: since.Add(2 * time.Minute)})
-	if got := absent.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "No person detected since 07.09 09:05." {
-		t.Fatalf("absence text = %q", got)
-	}
-	returned := renderPresenceEvent(presence.Event{Kind: presence.EventReturned, Since: since, At: since.Add(3*time.Minute + 12*time.Second)})
-	if got := returned.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "Person detected after 3m 12s." {
-		t.Fatalf("return text = %q", got)
-	}
-}
-
 func TestRenderPresenceSettings(t *testing.T) {
 	snapshot := presence.Snapshot{
 		Policy: presence.Policy{

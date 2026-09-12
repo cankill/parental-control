@@ -42,7 +42,7 @@ func (h *handlerRegistry) sendActivity(c *updateContext, period types.ActivityPe
 	if err != nil {
 		return c.RespondRichMessage(renderNotice("Activity unavailable", "ParentControl is shutting down."))
 	}
-	if total, _ := activityMetrics(activityBuckets(resp)); total == 0 {
+	if total, _ := activityMetrics(activityBuckets(resp)); total == 0 && len(resp.Presence) == 0 {
 		return c.RespondRichMessage(renderNoActivity(resp))
 	}
 	data, err := renderActivityPNG(resp)
@@ -64,7 +64,7 @@ func (h *handlerRegistry) navigateActivity(c *updateContext) error {
 	if err != nil {
 		return c.AnswerCallback("Activity unavailable", false)
 	}
-	if total, _ := activityMetrics(activityBuckets(resp)); total == 0 {
+	if total, _ := activityMetrics(activityBuckets(resp)); total == 0 && len(resp.Presence) == 0 {
 		return c.EditRichMessage(renderNoActivity(resp))
 	}
 	data, err := renderActivityPNG(resp)

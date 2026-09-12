@@ -25,6 +25,7 @@ import (
 const activityChartWidth, activityChartHeight = 900, 900
 const activityCenterX, activityCenterY = 450, 450
 const activityInnerRadius, activityOuterRadius = 70.0, 365.0
+const activityPresenceRadius = 373.0
 const activityClockRadius = 390.0
 const activityWorkdaySeconds = 8 * 60 * 60
 const activitySmallFontSize = 11.0
@@ -39,6 +40,7 @@ var (
 	keyboardColor   = color.RGBA{59, 130, 246, 255}
 	mouseColor      = color.RGBA{249, 115, 22, 255}
 	totalColor      = color.RGBA{16, 185, 129, 255}
+	presenceColor   = color.RGBA{22, 163, 74, 255}
 	chartRegular    = mustParseChartFont(goregular.TTF)
 	chartBold       = mustParseChartFont(gobold.TTF)
 )
@@ -298,6 +300,38 @@ func drawActivityBars(ctx *canvas.Context, buckets []types.ActivityBucket, maxim
 	}
 }
 
+func drawPresenceOutline(ctx *canvas.Context, resp *types.ActivityResponse) {
+	if resp.PeriodStart.IsZero() || resp.PeriodEnd.IsZero() || !resp.PeriodStart.Before(resp.PeriodEnd) {
+		return
+	}
+	periodDuration := resp.PeriodEnd.Sub(resp.PeriodStart)
+	for _, interval := range resp.Presence {
+		start := interval.Start
+		end := interval.End
+		if start.Before(resp.PeriodStart) {
+			start = resp.PeriodStart
+		}
+		if end.After(resp.PeriodEnd) {
+			end = resp.PeriodEnd
+		}
+		if !start.Before(end) {
+			continue
+		}
+		startAngle := -math.Pi/2 + 2*math.Pi*float64(start.Sub(resp.PeriodStart))/float64(periodDuration)
+		endAngle := -math.Pi/2 + 2*math.Pi*float64(end.Sub(resp.PeriodStart))/float64(periodDuration)
+		ctx.SetFill(nil)
+		ctx.SetStrokeColor(presenceColor)
+		ctx.SetStrokeWidth(7)
+		ctx.SetStrokeCapper(canvas.RoundCap)
+		x, y := activityPolarPoint(activityPresenceRadius, startAngle)
+		ctx.DrawPath(x, y, canvas.Arc(
+			activityPresenceRadius,
+			startAngle*180/math.Pi,
+			endAngle*180/math.Pi,
+		))
+	}
+}
+
 func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 	regularFace, err := newChartFace(chartRegular, 13)
 	if err != nil {
@@ -331,6 +365,7 @@ func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 	drawActivityGrid(ctx, img, scaleFace, maximumSeconds, len(buckets))
 	drawActivityBars(ctx, buckets, maximumSeconds)
 	drawActivityClock(ctx, img, regularFace, resp.Period, len(buckets))
+	drawPresenceOutline(ctx, resp)
 	drawCanvasCircle(ctx, activityInnerRadius-12, 2, chartBackground, chartAxis)
 	ras.Close()
 
@@ -340,6 +375,7 @@ func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 	drawActivityLegendItem(img, smallFace, 18, 28, "Total", totalColor)
 	drawActivityLegendItem(img, smallFace, 18, 51, "Keyboard", keyboardColor)
 	drawActivityLegendItem(img, smallFace, 18, 74, "Mouse", mouseColor)
+	drawActivityLegendItem(img, smallFace, 18, 97, "Presence", presenceColor)
 	var out bytes.Buffer
 	if err := png.Encode(&out, img); err != nil {
 		return nil, err

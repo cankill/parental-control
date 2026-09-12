@@ -76,13 +76,24 @@ type ActivityResponse struct {
 	Period        ActivityPeriod
 	TimeStamp     string
 	Shift         int
+	PeriodStart   time.Time
+	PeriodEnd     time.Time
 	BucketSeconds int
 	Buckets       []ActivityBucket
+	Presence      []PresenceInterval
 	PeakSeconds   int
 	OlderShift    int
 	NewerShift    int
 	HasOlder      bool
 	HasNewer      bool
+}
+
+// PresenceInterval is a confirmed interval when a person was detected at the
+// workstation. Activity reports use these timestamps to draw presence on the
+// same time axis as keyboard and mouse activity.
+type PresenceInterval struct {
+	Start time.Time
+	End   time.Time
 }
 
 type PresenceKind uint8

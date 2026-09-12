@@ -142,6 +142,44 @@ func clonePresenceResponse(source *types.PresenceResponse) *types.PresenceRespon
 }
 
 func (s *StatsStorage) presenceDaySummary(day string) types.PresenceDaySummary {
+	samples := resolvePresenceSamples(s.presenceDaySamples(day))
+	summary := types.PresenceDaySummary{Date: day}
+	var current *types.PresenceAbsence
+	finishAbsence := func() {
+		if current == nil {
+			return
+		}
+		summary.Absences = append(summary.Absences, *current)
+		summary.AbsenceCount++
+		if current.Seconds > summary.LongestAbsence {
+			summary.LongestAbsence = current.Seconds
+		}
+		current = nil
+	}
+	for _, sample := range samples {
+		switch sample.Kind {
+		case types.PresencePresent:
+			finishAbsence()
+			summary.PresentSeconds += sample.Seconds
+		case types.PresenceUnavailable:
+			finishAbsence()
+			summary.UnavailableSeconds += sample.Seconds
+		case types.PresenceMissing:
+			summary.AbsentSeconds += sample.Seconds
+			continuous := current != nil && !sample.At.After(current.End.Add(5*time.Second))
+			if !continuous {
+				finishAbsence()
+				current = &types.PresenceAbsence{Start: sample.At}
+			}
+			current.End = sample.At.Add(time.Duration(sample.Seconds) * time.Second)
+			current.Seconds += sample.Seconds
+		}
+	}
+	finishAbsence()
+	return summary
+}
+
+func (s *StatsStorage) presenceDaySamples(day string) []types.PresenceSample {
 	values := s.localStorage.GetValues(presenceBucketPrefix + day)
 	samples := make([]types.PresenceSample, 0, len(values))
 	for key, raw := range values {
@@ -165,57 +203,90 @@ func (s *StatsStorage) presenceDaySummary(day string) types.PresenceDaySummary {
 		}
 	}
 	sort.Slice(samples, func(i, j int) bool { return samples[i].At.Before(samples[j].At) })
+	return samples
+}
 
-	summary := types.PresenceDaySummary{Date: day}
-	var current *types.PresenceAbsence
+// resolvePresenceSamples applies the same consecutive-miss debounce as the
+// live detector. A short camera miss remains presence in historical reports.
+func resolvePresenceSamples(samples []types.PresenceSample) []types.PresenceSample {
+	resolved := make([]types.PresenceSample, 0, len(samples))
+	missing := make([]types.PresenceSample, 0)
 	missingSamples := 0
 	missingThreshold := 0
 	var previous types.PresenceSample
-	finishAbsence := func() {
-		if current == nil {
+	finishMissing := func() {
+		if len(missing) == 0 {
 			return
 		}
-		if missingSamples >= missingThreshold {
-			summary.AbsentSeconds += current.Seconds
-			summary.Absences = append(summary.Absences, *current)
-			summary.AbsenceCount++
-			if current.Seconds > summary.LongestAbsence {
-				summary.LongestAbsence = current.Seconds
+		if missingSamples < missingThreshold {
+			for i := range missing {
+				missing[i].Kind = types.PresencePresent
 			}
-		} else {
-			// The live monitor applies the same debounce before declaring an
-			// absence. Short isolated misses are treated as presence so camera
-			// noise does not distort the historical report.
-			summary.PresentSeconds += current.Seconds
 		}
-		current = nil
+		resolved = append(resolved, missing...)
+		missing = missing[:0]
 		missingSamples = 0
 		missingThreshold = 0
 	}
 	for _, sample := range samples {
 		switch sample.Kind {
 		case types.PresencePresent:
-			finishAbsence()
-			summary.PresentSeconds += sample.Seconds
+			finishMissing()
+			resolved = append(resolved, sample)
 		case types.PresenceUnavailable:
-			finishAbsence()
-			summary.UnavailableSeconds += sample.Seconds
+			finishMissing()
+			resolved = append(resolved, sample)
 		case types.PresenceMissing:
-			continuous := current != nil && sample.At.Sub(previous.At) <=
+			continuous := len(missing) != 0 && sample.At.Sub(previous.At) <=
 				time.Duration(maxInt(sample.Seconds, previous.Seconds)+5)*time.Second
 			if !continuous {
-				finishAbsence()
-				current = &types.PresenceAbsence{Start: sample.At}
+				finishMissing()
 				missingThreshold = sample.MissThreshold
 			}
-			current.End = sample.At.Add(time.Duration(sample.Seconds) * time.Second)
-			current.Seconds += sample.Seconds
+			missing = append(missing, sample)
 			missingSamples++
 		}
 		previous = sample
 	}
-	finishAbsence()
-	return summary
+	finishMissing()
+	return resolved
+}
+
+func (s *StatsStorage) presenceIntervals(start, end time.Time) []types.PresenceInterval {
+	if start.IsZero() || end.IsZero() || !start.Before(end) {
+		return nil
+	}
+	firstDay := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+	lastMoment := end.Add(-time.Nanosecond)
+	lastDay := time.Date(lastMoment.Year(), lastMoment.Month(), lastMoment.Day(), 0, 0, 0, 0, lastMoment.Location())
+	var intervals []types.PresenceInterval
+	for day := firstDay; !day.After(lastDay); day = day.AddDate(0, 0, 1) {
+		for _, sample := range resolvePresenceSamples(s.presenceDaySamples(day.Format(TruncatedToDay))) {
+			if sample.Kind != types.PresencePresent {
+				continue
+			}
+			intervalStart := sample.At
+			intervalEnd := sample.At.Add(time.Duration(sample.Seconds) * time.Second)
+			if intervalStart.Before(start) {
+				intervalStart = start
+			}
+			if intervalEnd.After(end) {
+				intervalEnd = end
+			}
+			if !intervalStart.Before(intervalEnd) {
+				continue
+			}
+			last := len(intervals) - 1
+			if last >= 0 && !intervalStart.After(intervals[last].End.Add(5*time.Second)) {
+				if intervalEnd.After(intervals[last].End) {
+					intervals[last].End = intervalEnd
+				}
+				continue
+			}
+			intervals = append(intervals, types.PresenceInterval{Start: intervalStart, End: intervalEnd})
+		}
+	}
+	return intervals
 }
 
 func sumPresenceResponse(response *types.PresenceResponse) {

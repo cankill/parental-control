@@ -208,9 +208,9 @@ func CheckCamera() (CameraCheck, error) {
 	return result, nil
 }
 
-// Monitor observes presence until ctx is cancelled. It emits only state
-// transitions, so a prolonged absence never creates repeated alerts.
-func Monitor(ctx context.Context, controller *Controller, input *activity.InputSignal, events chan<- Event, samples chan<- types.AppCommand) {
+// Monitor observes presence until ctx is cancelled. State transitions are
+// recorded as privacy-preserving samples and never sent as proactive messages.
+func Monitor(ctx context.Context, controller *Controller, input *activity.InputSignal, samples chan<- types.AppCommand) {
 	initial := controller.Snapshot(time.Now())
 	machine := newMachine(initial.MissThreshold)
 	ticker := time.NewTicker(initial.Interval)
@@ -248,11 +248,6 @@ func Monitor(ctx context.Context, controller *Controller, input *activity.InputS
 			if event := machine.observe(at, observation); event != nil {
 				log.Printf("Presence transition: kind=%s state=%s at=%s since=%s", event.Kind, event.State,
 					event.At.Format(time.RFC3339), event.Since.Format(time.RFC3339))
-				select {
-				case events <- *event:
-				case <-ctx.Done():
-					return
-				}
 			}
 		}
 	}

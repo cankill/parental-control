@@ -2,6 +2,7 @@ package bot
 
 import (
 	"bytes"
+	"image"
 	"image/color"
 	"image/png"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"parental-control/internal/lib/types"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestRenderActivityPNG(t *testing.T) {
@@ -49,6 +51,28 @@ func TestRenderEmptyActivityPNG(t *testing.T) {
 	}
 }
 
+func TestRenderActivityPresenceOutline(t *testing.T) {
+	start := time.Date(2026, 9, 12, 9, 0, 0, 0, time.Local)
+	resp := &types.ActivityResponse{
+		Period: types.ActivityHourly, TimeStamp: "2026-09-12T09",
+		PeriodStart: start, PeriodEnd: start.Add(time.Hour),
+		BucketSeconds: 300, Buckets: make([]types.ActivityBucket, 12),
+		Presence: []types.PresenceInterval{{Start: start, End: start.Add(15 * time.Minute)}},
+	}
+	data, err := renderActivityPNG(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, y := activityPolarPoint(activityPresenceRadius, -math.Pi/4)
+	assertPixelColorNear(t, img, int(x), int(y), presenceColor)
+	x, y = activityPolarPoint(activityPresenceRadius, math.Pi/2)
+	assertNoPixelColorNear(t, img, int(x), int(y), presenceColor)
+}
+
 func TestRenderActivityPeriods(t *testing.T) {
 	tests := []struct {
 		period  types.ActivityPeriod
@@ -76,8 +100,14 @@ func TestWriteActivityPreview(t *testing.T) {
 	if path == "" {
 		t.Skip("ACTIVITY_PREVIEW_PATH is not set")
 	}
+	hourStart := time.Date(2026, 7, 28, 11, 0, 0, 0, time.Local)
 	hourly := &types.ActivityResponse{
 		Period: types.ActivityHourly, TimeStamp: "2026-07-28T11",
+		PeriodStart: hourStart, PeriodEnd: hourStart.Add(time.Hour),
+		Presence: []types.PresenceInterval{
+			{Start: hourStart.Add(2 * time.Minute), End: hourStart.Add(17 * time.Minute)},
+			{Start: hourStart.Add(23 * time.Minute), End: hourStart.Add(48 * time.Minute)},
+		},
 		BucketSeconds: 300, Buckets: []types.ActivityBucket{
 			{KeyboardOnlySeconds: 12, MouseOnlySeconds: 18, BothSeconds: 4},
 			{KeyboardOnlySeconds: 45, MouseOnlySeconds: 10, BothSeconds: 8},
@@ -93,8 +123,14 @@ func TestWriteActivityPreview(t *testing.T) {
 			{KeyboardOnlySeconds: 35, MouseOnlySeconds: 70, BothSeconds: 20},
 		},
 	}
+	dayStart := time.Date(2026, 7, 28, 0, 0, 0, 0, time.Local)
 	daily := &types.ActivityResponse{
 		Period: types.ActivityDaily, TimeStamp: "2026-07-28",
+		PeriodStart: dayStart, PeriodEnd: dayStart.AddDate(0, 0, 1),
+		Presence: []types.PresenceInterval{
+			{Start: dayStart.Add(8*time.Hour + 15*time.Minute), End: dayStart.Add(12*time.Hour + 10*time.Minute)},
+			{Start: dayStart.Add(13 * time.Hour), End: dayStart.Add(17*time.Hour + 40*time.Minute)},
+		},
 		BucketSeconds: 3600, Buckets: make([]types.ActivityBucket, 24),
 	}
 	for i := range daily.Buckets {
@@ -104,9 +140,15 @@ func TestWriteActivityPreview(t *testing.T) {
 			BothSeconds:         (i % 3) * 120,
 		}
 	}
+	weekStart := time.Date(2026, 7, 27, 0, 0, 0, 0, time.Local)
 	weekly := &types.ActivityResponse{
 		Period: types.ActivityWeekly, TimeStamp: "2026-07-27 – 2026-08-02",
+		PeriodStart: weekStart, PeriodEnd: weekStart.AddDate(0, 0, 7),
 		BucketSeconds: 86400, Buckets: make([]types.ActivityBucket, 7),
+	}
+	for day := 0; day < 5; day++ {
+		start := weekStart.AddDate(0, 0, day).Add(8*time.Hour + 30*time.Minute)
+		weekly.Presence = append(weekly.Presence, types.PresenceInterval{Start: start, End: start.Add(8 * time.Hour)})
 	}
 	for i := range weekly.Buckets {
 		weekly.Buckets[i] = types.ActivityBucket{
@@ -254,5 +296,28 @@ func assertPixelColor(t *testing.T, got color.Color, want color.RGBA) {
 	gotRGBA := color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), uint8(a >> 8)}
 	if gotRGBA != want {
 		t.Fatalf("pixel = %#v, want %#v", gotRGBA, want)
+	}
+}
+
+func assertPixelColorNear(t *testing.T, img image.Image, x, y int, want color.RGBA) {
+	t.Helper()
+	for dy := -3; dy <= 3; dy++ {
+		for dx := -3; dx <= 3; dx++ {
+			if color.RGBAModel.Convert(img.At(x+dx, y+dy)).(color.RGBA) == want {
+				return
+			}
+		}
+	}
+	t.Fatalf("color %#v not found near (%d,%d)", want, x, y)
+}
+
+func assertNoPixelColorNear(t *testing.T, img image.Image, x, y int, unwanted color.RGBA) {
+	t.Helper()
+	for dy := -3; dy <= 3; dy++ {
+		for dx := -3; dx <= 3; dx++ {
+			if color.RGBAModel.Convert(img.At(x+dx, y+dy)).(color.RGBA) == unwanted {
+				t.Fatalf("unexpected color %#v near (%d,%d)", unwanted, x, y)
+			}
+		}
 	}
 }

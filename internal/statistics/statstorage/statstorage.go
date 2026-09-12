@@ -434,11 +434,16 @@ func (s *StatsStorage) AddActivity(samples []types.ActivitySample) {
 }
 
 func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *types.ActivityResponse {
+	if shift < 0 {
+		shift = 0
+	}
 	now := time.Now()
 	resp := &types.ActivityResponse{Period: period, Shift: shift}
 	switch period {
 	case types.ActivityDaily:
 		day := now.AddDate(0, 0, -shift)
+		resp.PeriodStart = time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+		resp.PeriodEnd = resp.PeriodStart.AddDate(0, 0, 1)
 		resp.TimeStamp = day.Format(TruncatedToDay)
 		resp.BucketSeconds = 60 * 60
 		resp.Buckets = s.loadActivityBuckets("activity:day:"+resp.TimeStamp, finalizedDay(resp.TimeStamp), func() []types.ActivityBucket {
@@ -452,6 +457,8 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 	case types.ActivityWeekly:
 		weekStart := activityWeekStart(now).AddDate(0, 0, -7*shift)
 		weekEnd := weekStart.AddDate(0, 0, 6)
+		resp.PeriodStart = weekStart
+		resp.PeriodEnd = weekStart.AddDate(0, 0, 7)
 		resp.TimeStamp = weekStart.Format(TruncatedToDay) + " – " + weekEnd.Format(TruncatedToDay)
 		resp.BucketSeconds = 24 * 60 * 60
 		resp.Buckets = s.loadActivityBuckets("activity:week:"+weekStart.Format(TruncatedToDay), finalizedWeek(weekStart), func() []types.ActivityBucket {
@@ -467,13 +474,16 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 		})
 	default:
 		resp.Period = types.ActivityHourly
-		hour := now.Add(-time.Duration(shift) * time.Hour).Format(TruncatedToHour)
+		resp.PeriodStart = now.Add(-time.Duration(shift) * time.Hour).Truncate(time.Hour)
+		resp.PeriodEnd = resp.PeriodStart.Add(time.Hour)
+		hour := resp.PeriodStart.Format(TruncatedToHour)
 		resp.TimeStamp = hour
 		resp.BucketSeconds = 5 * 60
 		resp.Buckets = s.loadActivityBuckets("activity:hour:"+hour, finalizedHour(hour), func() []types.ActivityBucket {
 			return s.readActivityHourUncached(hour)
 		})
 	}
+	resp.Presence = s.presenceIntervals(resp.PeriodStart, resp.PeriodEnd)
 	resp.PeakSeconds = s.maxActivityPeriodSeconds(resp.Period)
 	return resp
 }
@@ -563,11 +573,7 @@ func (s *StatsStorage) NearestActivityShift(period types.ActivityPeriod, fromShi
 	currentHour := now.Truncate(time.Hour)
 	currentWeek := activityWeekStart(now)
 	best := -1
-	for hour := range s.activityHours() {
-		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
-		if err != nil {
-			continue
-		}
+	consider := func(t time.Time) {
 		var shift int
 		switch period {
 		case types.ActivityDaily:
@@ -578,13 +584,26 @@ func (s *StatsStorage) NearestActivityShift(period types.ActivityPeriod, fromShi
 			shift = int(currentHour.Sub(t.Truncate(time.Hour)) / time.Hour)
 		}
 		if shift < 0 {
-			continue
+			return
 		}
 		if older && shift > fromShift && (best == -1 || shift < best) {
 			best = shift
 		}
 		if !older && shift < fromShift && shift > best {
 			best = shift
+		}
+	}
+	for hour := range s.activityHours() {
+		t, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
+		if err == nil {
+			consider(t)
+		}
+	}
+	for day := range s.presenceDays() {
+		for _, sample := range resolvePresenceSamples(s.presenceDaySamples(day)) {
+			if sample.Kind == types.PresencePresent {
+				consider(sample.At)
+			}
 		}
 	}
 	return best, best != -1

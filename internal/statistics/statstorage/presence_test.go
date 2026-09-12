@@ -76,6 +76,28 @@ func TestPresenceSummaryDebouncesIsolatedCameraMiss(t *testing.T) {
 	}
 }
 
+func TestPresenceIntervalsUseConfirmedStateAndMergeSamples(t *testing.T) {
+	storage := newTestStorage(t)
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, time.Local)
+	for _, sample := range []types.PresenceSample{
+		{At: start, Kind: types.PresencePresent, Seconds: 60, MissThreshold: 3},
+		{At: start.Add(time.Minute), Kind: types.PresenceMissing, Seconds: 60, MissThreshold: 3},
+		{At: start.Add(2 * time.Minute), Kind: types.PresencePresent, Seconds: 60, MissThreshold: 3},
+		{At: start.Add(3 * time.Minute), Kind: types.PresenceMissing, Seconds: 60, MissThreshold: 1},
+	} {
+		storage.AddPresenceSample(sample)
+	}
+
+	intervals := storage.presenceIntervals(start, start.Add(time.Hour))
+	if len(intervals) != 1 {
+		t.Fatalf("presence intervals = %+v, want one merged interval", intervals)
+	}
+	if !intervals[0].Start.Equal(start) || !intervals[0].End.Equal(start.Add(3*time.Minute)) {
+		t.Fatalf("presence interval = %+v", intervals[0])
+	}
+}
+
 func TestPresenceWeeklySummaryIncludesDailyBreakdown(t *testing.T) {
 	storage := newTestStorage(t)
 	weekStart := activityWeekStart(time.Now())

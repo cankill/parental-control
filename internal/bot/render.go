@@ -174,18 +174,6 @@ func renderNotice(title, text string) models.InputRichMessage {
 	return models.InputRichMessage{Blocks: blocks}
 }
 
-func renderPresenceEvent(event presence.Event) models.InputRichMessage {
-	switch event.Kind {
-	case presence.EventAbsent:
-		return renderNotice("Presence alert", "No person detected since "+event.Since.Format("02.01 15:04")+".")
-	case presence.EventReturned:
-		duration := event.At.Sub(event.Since).Round(time.Second)
-		return renderNotice("Presence restored", "Person detected after "+formatCompactDuration(duration)+".")
-	default:
-		return renderNotice("Presence unavailable", "Camera or local analysis failed repeatedly; absence was not inferred.")
-	}
-}
-
 func renderPresenceSettings(snapshot presence.Snapshot) models.InputRichMessage {
 	policy := snapshot.Policy
 	enabled := "Off"

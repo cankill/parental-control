@@ -29,7 +29,7 @@ type handlerRegistry struct {
 	callbacks map[string]handlerFunc
 }
 
-func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceEvents <-chan presence.Event, presenceController *presence.Controller) {
+func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceController *presence.Controller) {
 	wg := ctx.Value(types.WgKey{}).(*sync.WaitGroup)
 	defer wg.Done()
 
@@ -72,37 +72,8 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceEve
 	h.registerYoutubeHandlers()
 	h.bindHandlers()
 
-	notificationCtx, stopNotifications := context.WithCancel(ctx)
-	notificationsDone := make(chan struct{})
-	go func() {
-		defer close(notificationsDone)
-		h.sendPresenceNotifications(notificationCtx, admins, presenceEvents)
-	}()
 	b.Start(ctx)
-	stopNotifications()
-	<-notificationsDone
 	fmt.Println("Bot stopped")
-}
-
-func (h *handlerRegistry) sendPresenceNotifications(ctx context.Context, admins []int64, events <-chan presence.Event) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case event, ok := <-events:
-			if !ok {
-				return
-			}
-			message := renderPresenceEvent(event)
-			for _, chatID := range admins {
-				if err := h.rich.send(ctx, chatID, message, 0); err != nil {
-					log.Printf("Presence notification failed for chat %d: %s", chatID, err)
-				} else {
-					log.Printf("Presence notification sent: kind=%s chat=%d", event.Kind, chatID)
-				}
-			}
-		}
-	}
 }
 
 func botCommands() []models.BotCommand {

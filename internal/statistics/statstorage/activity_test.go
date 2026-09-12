@@ -69,6 +69,9 @@ func TestGetActivityGroupsHourDayAndWeek(t *testing.T) {
 	if hourly.Buckets[0].ActiveSeconds() != 15 || hourly.Buckets[1].ActiveSeconds() != 27 {
 		t.Fatalf("hourly buckets = %+v", hourly.Buckets[:2])
 	}
+	if !hourly.PeriodStart.Equal(first) || !hourly.PeriodEnd.Equal(first.Add(time.Hour)) {
+		t.Fatalf("hourly period = %v - %v", hourly.PeriodStart, hourly.PeriodEnd)
+	}
 
 	daily := s.GetActivity(types.ActivityDaily, 0)
 	if len(daily.Buckets) != 24 || daily.BucketSeconds != 3600 {
@@ -87,6 +90,22 @@ func TestGetActivityGroupsHourDayAndWeek(t *testing.T) {
 	weekBucket := weekly.Buckets[dayIndex]
 	if weekBucket.KeyboardOnlySeconds != 10 || weekBucket.MouseOnlySeconds != 20 || weekBucket.BothSeconds != 12 {
 		t.Fatalf("weekly aggregate = %+v", weekBucket)
+	}
+}
+
+func TestGetActivityIncludesPresenceAndPresenceOnlyNavigation(t *testing.T) {
+	s := activityStorage(t)
+	now := time.Now()
+	start := now.Truncate(time.Hour).Add(-3 * time.Hour)
+	s.AddPresenceSample(types.PresenceSample{At: start, Kind: types.PresencePresent, Seconds: 60})
+
+	response := s.GetActivity(types.ActivityHourly, 3)
+	if len(response.Presence) != 1 || !response.Presence[0].Start.Equal(start) ||
+		!response.Presence[0].End.Equal(start.Add(time.Minute)) {
+		t.Fatalf("activity presence = %+v", response.Presence)
+	}
+	if shift, ok := s.NearestActivityShift(types.ActivityHourly, 0, true); !ok || shift != 3 {
+		t.Fatalf("presence-only older shift = (%d,%v), want (3,true)", shift, ok)
 	}
 }
 

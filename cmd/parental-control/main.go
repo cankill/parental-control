@@ -38,7 +38,6 @@ func main() {
 		activityCtx = context.WithValue(activityCtx, types.WgKey{}, &activityWG)
 
 		statisticsCommandsChannel := make(chan types.AppCommand, 32)
-		presenceEvents := make(chan presence.Event, 8)
 		inputSignal := &activity.InputSignal{}
 		sigs := make(chan os.Signal, 1)
 
@@ -71,12 +70,12 @@ func main() {
 		}
 
 		wg.Add(1)
-		go bot.StartBot(ctx, statisticsCommandsChannel, presenceEvents, presenceController)
+		go bot.StartBot(ctx, statisticsCommandsChannel, presenceController)
 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			presence.Monitor(ctx, presenceController, inputSignal, presenceEvents, statisticsCommandsChannel)
+			presence.Monitor(ctx, presenceController, inputSignal, statisticsCommandsChannel)
 		}()
 
 		go func() {
