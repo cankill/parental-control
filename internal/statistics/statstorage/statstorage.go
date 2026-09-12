@@ -519,6 +519,13 @@ func (s *StatsStorage) maxActivityPeriodSeconds(period types.ActivityPeriod) int
 	return index.activityPeaks[period]
 }
 
+// WarmActivityIndex performs the one historical scan at service startup so a
+// user request never pays the cold-cache cost. All three peak granularities
+// are built together and subsequent writes update them incrementally.
+func (s *StatsStorage) WarmActivityIndex() {
+	_ = s.maxActivityPeriodSeconds(types.ActivityHourly)
+}
+
 func (s *StatsStorage) readActivityHour(hour string) []types.ActivityBucket {
 	return s.loadActivityBuckets("activity:hour:"+hour, finalizedHour(hour), func() []types.ActivityBucket {
 		return s.readActivityHourUncached(hour)

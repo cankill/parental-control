@@ -128,6 +128,22 @@ func TestActivityPeakTotalsUpdateIncrementally(t *testing.T) {
 	}
 }
 
+func TestWarmActivityIndexBuildsAllPeakGranularities(t *testing.T) {
+	storage := newTestStorage(t)
+	now := time.Now().Truncate(time.Hour)
+	storage.AddActivity([]types.ActivitySample{{At: now, Kind: types.ActivityBoth}})
+
+	storage.WarmActivityIndex()
+	if !storage.index.activityTotalsReady {
+		t.Fatal("activity totals index was not warmed")
+	}
+	for _, period := range []types.ActivityPeriod{types.ActivityHourly, types.ActivityDaily, types.ActivityWeekly} {
+		if got := storage.maxActivityPeriodSeconds(period); got != 1 {
+			t.Fatalf("warmed peak for period %d = %d, want 1", period, got)
+		}
+	}
+}
+
 func TestPeriodIndexLearnsWritesAfterInitialScan(t *testing.T) {
 	storage := newTestStorage(t)
 	if _, ok := storage.NearestDayShift(0, true); ok {

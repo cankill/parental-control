@@ -64,7 +64,9 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 	activatedAt := time.Now()
 
 	storage := statstorage.Open()
-	fmt.Println("Storage opened")
+	warmStarted := time.Now()
+	storage.WarmActivityIndex()
+	fmt.Printf("Storage opened; activity index warmed in %s\n", time.Since(warmStarted).Round(time.Millisecond))
 
 	ticker := time.NewTicker(time.Second * 30)
 	defer ticker.Stop()
