@@ -16,6 +16,29 @@ func TestSelectCandidateRequiresTwoFramesAtThreshold(t *testing.T) {
 	}
 }
 
+func TestMonitorNotifiesOncePerHeldGesture(t *testing.T) {
+	m := &monitor{}
+	if !m.observeCandidate(true) {
+		t.Fatal("first pinch was not accepted")
+	}
+	m.latched = true
+	if m.observeCandidate(true) {
+		t.Fatal("held pinch was accepted again")
+	}
+	if m.observeCandidate(false) {
+		t.Fatal("clear frame was accepted")
+	}
+	if m.observeCandidate(true) {
+		t.Fatal("one clear check rearmed the detector")
+	}
+	if m.observeCandidate(false) || m.observeCandidate(false) {
+		t.Fatal("clear checks were accepted")
+	}
+	if !m.observeCandidate(true) {
+		t.Fatal("new pinch was not accepted after two clear checks")
+	}
+}
+
 func TestStorePersistsLabelsAndSummary(t *testing.T) {
 	store, err := OpenStore(t.TempDir())
 	if err != nil {
@@ -59,6 +82,30 @@ func TestStoreRejectsUnsafeIDsAndLabels(t *testing.T) {
 	}
 	if _, err := store.SetLabel(record.ID, Label("other"), time.Now()); err == nil {
 		t.Fatal("unknown label was accepted")
+	}
+}
+
+func TestSummarySeparatesLegacyGenericCandidates(t *testing.T) {
+	store, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := Record{ID: "legacy", CapturedAt: time.Now(), Score: 0.9, Label: LabelWatch}
+	store.mu.Lock()
+	err = store.writeLocked(legacy)
+	store.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(time.Now().Add(time.Nanosecond), 0.91); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := store.Summary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Total != 1 || summary.Pending != 1 || summary.Legacy != 1 {
+		t.Fatalf("summary = %+v", summary)
 	}
 }
 

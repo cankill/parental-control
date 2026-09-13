@@ -1,4 +1,4 @@
-// Package facetouch detects candidate hand-near-chin events and stores only
+// Package facetouch detects candidate pinch-near-chin events and stores only
 // their metadata and user-provided labels. Camera images are transient.
 package facetouch
 
@@ -20,12 +20,15 @@ const (
 	LabelPending Label = "pending"
 	LabelWatch   Label = "watch"
 	LabelIgnore  Label = "ignore"
+
+	DetectorPinchNearChinV1 = "pinch-near-chin-v1"
 )
 
 type Record struct {
 	ID         string    `json:"id"`
 	CapturedAt time.Time `json:"captured_at"`
 	Score      float64   `json:"score"`
+	Detector   string    `json:"detector,omitempty"`
 	Label      Label     `json:"label"`
 	LabeledAt  time.Time `json:"labeled_at,omitempty"`
 }
@@ -36,6 +39,7 @@ type Summary struct {
 	Watch    int
 	Ignore   int
 	LatestAt time.Time
+	Legacy   int
 }
 
 func (s Summary) Labeled() int { return s.Watch + s.Ignore }
@@ -81,7 +85,7 @@ func (s *Store) Create(at time.Time, score float64) (Record, error) {
 	}
 	record := Record{
 		ID: strconv.FormatInt(at.UnixNano(), 36), CapturedAt: at,
-		Score: score, Label: LabelPending,
+		Score: score, Detector: DetectorPinchNearChinV1, Label: LabelPending,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -136,6 +140,10 @@ func (s *Store) Summary() (Summary, error) {
 		id := entry.Name()[:len(entry.Name())-len(".json")]
 		record, err := s.readLocked(id)
 		if err != nil {
+			continue
+		}
+		if record.Detector != DetectorPinchNearChinV1 {
+			summary.Legacy++
 			continue
 		}
 		summary.Total++

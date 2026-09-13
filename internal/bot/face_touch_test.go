@@ -20,6 +20,9 @@ func TestRenderFaceTouchCandidateIncludesPhotoAndLabels(t *testing.T) {
 	if photo.Photo.Media != "attach://chin-abc123.jpg" || photo.Caption == nil || photo.Caption.Text.PlainText == "" {
 		t.Fatalf("candidate photo = %#v", photo)
 	}
+	if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%\nIs this a hair-plucking pose?" {
+		t.Fatalf("candidate caption = %q", photo.Caption.Text.PlainText)
+	}
 	buttons := message.Blocks[1].InputRichBlockButtons.Buttons
 	if len(buttons) != 2 || buttons[0].CallbackData != "\fface-touch-label|abc123:watch" || buttons[1].CallbackData != "\fface-touch-label|abc123:ignore" {
 		t.Fatalf("candidate buttons = %#v", buttons)

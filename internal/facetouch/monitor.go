@@ -52,6 +52,8 @@ type monitor struct {
 	options  Options
 	events   chan<- Candidate
 	lastSent time.Time
+	latched  bool
+	clear    int
 	capture  func() ([]string, error)
 	analyze  func(string) (vision.FaceTouchDetection, error)
 	now      func() time.Time
@@ -81,9 +83,6 @@ func Monitor(ctx context.Context, presence Presence, store *Store, options Optio
 
 func (m *monitor) check(ctx context.Context) error {
 	now := m.now()
-	if !m.lastSent.IsZero() && now.Sub(m.lastSent) < m.options.Cooldown {
-		return nil
-	}
 	paths, err := m.capture()
 	if err != nil {
 		return err
@@ -103,7 +102,11 @@ func (m *monitor) check(ctx context.Context) error {
 		frames = append(frames, analyzedFrame{path: path, score: detection.Score})
 	}
 	path, score, ok := selectCandidate(frames, m.options.Threshold, m.options.RequiredFrames)
-	if !ok {
+	if !m.observeCandidate(ok) {
+		return nil
+	}
+	if !m.lastSent.IsZero() && now.Sub(m.lastSent) < m.options.Cooldown {
+		m.latched = true
 		return nil
 	}
 	photo, err := os.ReadFile(path)
@@ -118,10 +121,25 @@ func (m *monitor) check(ctx context.Context) error {
 	select {
 	case m.events <- candidate:
 		m.lastSent = now
+		m.latched = true
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// observeCandidate reports only the beginning of a gesture. The detector is
+// rearmed after two clear checks so one held pinch produces one notification.
+func (m *monitor) observeCandidate(hit bool) bool {
+	if hit {
+		m.clear = 0
+		return !m.latched
+	}
+	m.clear++
+	if m.clear >= 2 {
+		m.latched = false
+	}
+	return false
 }
 
 func selectCandidate(frames []analyzedFrame, threshold float64, required int) (string, float64, bool) {

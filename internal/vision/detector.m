@@ -109,18 +109,6 @@ int pc_analyze_face_touch(const char *path, int *faces, int *hands, double *scor
 			*faces = (int)faceResults.count;
 			*hands = (int)handResults.count;
 
-			NSArray *jointNames = @[
-				VNHumanHandPoseObservationJointNameThumbTip,
-				VNHumanHandPoseObservationJointNameIndexTip,
-				VNHumanHandPoseObservationJointNameMiddleTip,
-				VNHumanHandPoseObservationJointNameRingTip,
-				VNHumanHandPoseObservationJointNameLittleTip,
-				VNHumanHandPoseObservationJointNameIndexMCP,
-				VNHumanHandPoseObservationJointNameMiddleMCP,
-				VNHumanHandPoseObservationJointNameRingMCP,
-				VNHumanHandPoseObservationJointNameLittleMCP
-			];
-
 			for (VNFaceObservation *face in faceResults) {
 				VNFaceLandmarkRegion2D *contour = face.landmarks.faceContour;
 				if (contour == nil || contour.pointCount == 0 || face.boundingBox.size.width <= 0 || face.boundingBox.size.height <= 0) {
@@ -137,27 +125,37 @@ int pc_analyze_face_touch(const char *path, int *faces, int *hands, double *scor
 					}
 				}
 
-				double radiusX = face.boundingBox.size.width * 0.33;
-				double radiusY = face.boundingBox.size.height * 0.27;
+				double radiusX = face.boundingBox.size.width * 0.42;
+				double radiusY = face.boundingBox.size.height * 0.32;
+				double maximumPinchDistance = face.boundingBox.size.width * 0.28;
 				for (VNHumanHandPoseObservation *hand in handResults) {
-					for (NSString *jointName in jointNames) {
-						NSError *pointError = nil;
-						VNRecognizedPoint *point = [hand recognizedPointForJointName:jointName error:&pointError];
-						if (point == nil || pointError != nil || point.confidence < 0.3) {
-							continue;
-						}
-						double dx = (point.location.x - chinX) / radiusX;
-						double dy = (point.location.y - chinY) / radiusY;
-						double normalizedDistance = hypot(dx, dy);
-						if (normalizedDistance > 1.0) {
-							continue;
-						}
-						double proximity = 1.0 - normalizedDistance;
-						double confidence = fmin(face.confidence, point.confidence);
-						double candidate = 0.65 * proximity + 0.35 * confidence;
-						if (candidate > *score) {
-							*score = candidate;
-						}
+					NSError *thumbError = nil;
+					NSError *indexError = nil;
+					VNRecognizedPoint *thumb = [hand recognizedPointForJointName:VNHumanHandPoseObservationJointNameThumbTip error:&thumbError];
+					VNRecognizedPoint *index = [hand recognizedPointForJointName:VNHumanHandPoseObservationJointNameIndexTip error:&indexError];
+					if (thumb == nil || index == nil || thumbError != nil || indexError != nil || thumb.confidence < 0.3 || index.confidence < 0.3) {
+						continue;
+					}
+
+					double pinchDistance = hypot(thumb.location.x - index.location.x, thumb.location.y - index.location.y);
+					if (pinchDistance > maximumPinchDistance) {
+						continue;
+					}
+					double pinchX = (thumb.location.x + index.location.x) / 2.0;
+					double pinchY = (thumb.location.y + index.location.y) / 2.0;
+					double dx = (pinchX - chinX) / radiusX;
+					double dy = (pinchY - chinY) / radiusY;
+					double normalizedDistance = hypot(dx, dy);
+					if (normalizedDistance > 1.0) {
+						continue;
+					}
+
+					double chinProximity = 1.0 - normalizedDistance;
+					double pinchScore = 1.0 - pinchDistance / maximumPinchDistance;
+					double confidence = fmin(face.confidence, fmin(thumb.confidence, index.confidence));
+					double candidate = 0.50 * chinProximity + 0.35 * pinchScore + 0.15 * confidence;
+					if (candidate > *score) {
+						*score = candidate;
 					}
 				}
 			}

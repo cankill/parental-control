@@ -42,7 +42,7 @@ func (h *handlerRegistry) forwardFaceTouchEvents(ctx context.Context, admins []i
 
 func renderFaceTouchCandidate(candidate facetouch.Candidate) models.InputRichMessage {
 	percent := int(math.Round(candidate.Record.Score * 100))
-	caption := fmt.Sprintf("Hand near chin\nScore: %d%%\nIs this a case to track?", percent)
+	caption := fmt.Sprintf("Pinch near chin\nScore: %d%%\nIs this a hair-plucking pose?", percent)
 	return renderPhoto(bytes.NewReader(candidate.Photo), "chin-"+candidate.Record.ID+".jpg", caption,
 		richCallbackButton("👍", faceTouchLabelAction, candidate.Record.ID+":"+string(facetouch.LabelWatch)),
 		richCallbackButton("👎", faceTouchLabelAction, candidate.Record.ID+":"+string(facetouch.LabelIgnore)))
@@ -62,7 +62,7 @@ func parseFaceTouchLabel(data string) (string, facetouch.Label, bool) {
 
 func (h *handlerRegistry) labelFaceTouch(c *updateContext) error {
 	if h.faceTouch == nil {
-		return c.AnswerCallback("Chin-touch storage unavailable", true)
+		return c.AnswerCallback("Chin-pinch storage unavailable", true)
 	}
 	id, label, ok := parseFaceTouchLabel(c.Data())
 	if !ok {
@@ -72,21 +72,25 @@ func (h *handlerRegistry) labelFaceTouch(c *updateContext) error {
 		return c.AnswerCallback("Could not save label", true)
 	}
 	if label == facetouch.LabelWatch {
-		return c.AnswerCallback("Saved: track this", false)
+		return c.AnswerCallback("Saved: hair-plucking pose", false)
 	}
-	return c.AnswerCallback("Saved: ignore this", false)
+	return c.AnswerCallback("Saved: other gesture", false)
 }
 
 func (h *handlerRegistry) sendFaceTouchStats(c *updateContext) error {
 	if h.faceTouch == nil {
-		return c.RespondRichMessage(renderNotice("Chin-touch statistics", "Storage unavailable."))
+		return c.RespondRichMessage(renderNotice("Chin-pinch statistics", "Storage unavailable."))
 	}
 	summary, err := h.faceTouch.Summary()
 	if err != nil {
-		return c.RespondRichMessage(renderNotice("Chin-touch statistics", err.Error()))
+		return c.RespondRichMessage(renderNotice("Chin-pinch statistics", err.Error()))
 	}
 	if summary.Total == 0 {
-		return c.RespondRichMessage(renderNotice("Chin-touch statistics", "No candidates yet."))
+		text := "No pinch candidates yet."
+		if summary.Legacy > 0 {
+			text += fmt.Sprintf("\nPrevious hand-near-chin candidates preserved: %d", summary.Legacy)
+		}
+		return c.RespondRichMessage(renderNotice("Chin-pinch statistics", text))
 	}
 	latest := "—"
 	if !summary.LatestAt.IsZero() {
@@ -94,5 +98,8 @@ func (h *handlerRegistry) sendFaceTouchStats(c *updateContext) error {
 	}
 	text := fmt.Sprintf("Candidates: %d\n👍 Track: %d\n👎 Ignore: %d\nUnlabeled: %d\nAccepted among labeled: %d%%\nLatest: %s",
 		summary.Total, summary.Watch, summary.Ignore, summary.Pending, summary.AcceptedPercent(), latest)
-	return c.RespondRichMessage(renderNotice("Chin-touch statistics", text))
+	if summary.Legacy > 0 {
+		text += fmt.Sprintf("\nPrevious hand-near-chin candidates: %d", summary.Legacy)
+	}
+	return c.RespondRichMessage(renderNotice("Chin-pinch statistics", text))
 }

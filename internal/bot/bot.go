@@ -105,7 +105,7 @@ func botCommands() []models.BotCommand {
 		{Command: "presence_on", Description: "Enable presence: /presence_on [period]"},
 		{Command: "presence_off", Description: "Disable presence monitoring"},
 		{Command: "presence_status", Description: "Show presence parameters"},
-		{Command: "chin", Description: "Chin-touch detector statistics"},
+		{Command: "chin", Description: "Chin-pinch detector statistics"},
 		{Command: "youtube", Description: "Block / unblock YouTube"},
 	}
 }
