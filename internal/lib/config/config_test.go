@@ -52,4 +52,8 @@ func TestMustLoadParsesMultipleAdmins(t *testing.T) {
 	if len(env.PresenceWorkDays) != 5 || env.PresenceWorkDays[0] != 1 || env.PresenceWorkDays[4] != 5 {
 		t.Errorf("presence work days = %v", env.PresenceWorkDays)
 	}
+	if env.FaceTouchInterval() != 10*time.Second || env.FaceTouchThreshold() != 0.8 || env.FaceTouchCooldown() != 30*time.Second {
+		t.Errorf("face-touch defaults = interval %s threshold %.2f cooldown %s",
+			env.FaceTouchInterval(), env.FaceTouchThreshold(), env.FaceTouchCooldown())
+	}
 }

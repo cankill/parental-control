@@ -87,3 +87,23 @@ func TestOutsideScheduleClearsPendingAbsence(t *testing.T) {
 		t.Fatalf("miss leaked across schedule boundary: %+v", event)
 	}
 }
+
+func TestSignalReportsOnlyConfirmedPresence(t *testing.T) {
+	signal := NewSignal()
+	if signal.Present() {
+		t.Fatal("new signal unexpectedly reports presence")
+	}
+	at := time.Date(2026, 9, 13, 9, 0, 0, 0, time.Local)
+	signal.update(StatePresent, at)
+	if !signal.Present() {
+		t.Fatal("confirmed presence was not exposed")
+	}
+	state, updated := signal.Snapshot()
+	if state != StatePresent || !updated.Equal(at) {
+		t.Fatalf("signal snapshot = %s %s", state, updated)
+	}
+	signal.update(StateSuspectedAbsent, at.Add(time.Minute))
+	if signal.Present() {
+		t.Fatal("suspected absence still exposed as presence")
+	}
+}

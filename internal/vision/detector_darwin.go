@@ -44,3 +44,32 @@ func AnalyzeImage(path string) (Detection, error) {
 	}
 	return Detection{Humans: int(humans), Faces: int(faces)}, nil
 }
+
+// FaceTouchDetection is a frame-level geometric score. Score is not a
+// calibrated probability: it combines Vision landmark confidence with the
+// normalized distance between recognized hand joints and the chin contour.
+type FaceTouchDetection struct {
+	Faces int
+	Hands int
+	Score float64
+}
+
+// AnalyzeFaceTouch detects face landmarks and hand pose locally, then scores
+// how closely a recognized hand joint overlaps the chin region.
+func AnalyzeFaceTouch(path string) (FaceTouchDetection, error) {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	var faces C.int
+	var hands C.int
+	var score C.double
+	var errorMessage *C.char
+	if C.pc_analyze_face_touch(cPath, &faces, &hands, &score, &errorMessage) != 0 {
+		if errorMessage == nil {
+			return FaceTouchDetection{}, fmt.Errorf("Apple Vision face-touch analysis failed")
+		}
+		defer C.free(unsafe.Pointer(errorMessage))
+		return FaceTouchDetection{}, fmt.Errorf("Apple Vision face-touch analysis failed: %s", C.GoString(errorMessage))
+	}
+	return FaceTouchDetection{Faces: int(faces), Hands: int(hands), Score: float64(score)}, nil
+}

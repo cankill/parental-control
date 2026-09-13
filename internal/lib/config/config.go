@@ -25,6 +25,12 @@ type Env struct {
 	PresenceStartHour        int   `env:"PRESENCE_START_HOUR" env-default:"8"`
 	PresenceEndHour          int   `env:"PRESENCE_END_HOUR" env-default:"18"`
 	PresenceWorkDays         []int `env:"PRESENCE_WORK_DAYS" env-separator:"," env-default:"1,2,3,4,5"`
+	// Face-touch detection runs automatically while presence is confirmed.
+	// These deployment values tune sampling and notification deduplication;
+	// there is intentionally no Telegram enable/disable command.
+	FaceTouchIntervalSeconds  int `env:"FACE_TOUCH_INTERVAL_SECONDS" env-default:"10"`
+	FaceTouchThresholdPercent int `env:"FACE_TOUCH_THRESHOLD_PERCENT" env-default:"80"`
+	FaceTouchCooldownSeconds  int `env:"FACE_TOUCH_COOLDOWN_SECONDS" env-default:"30"`
 }
 
 // UrlPollInterval — интервал опроса URL браузера, минимум 1с, дефолт 3с.
@@ -33,6 +39,33 @@ func (e *Env) UrlPollInterval() time.Duration {
 		return 3 * time.Second
 	}
 	return time.Duration(e.URLPollSeconds) * time.Second
+}
+
+func (e *Env) FaceTouchInterval() time.Duration {
+	if e.FaceTouchIntervalSeconds < 5 {
+		return 10 * time.Second
+	}
+	return time.Duration(e.FaceTouchIntervalSeconds) * time.Second
+}
+
+func (e *Env) FaceTouchThreshold() float64 {
+	percent := e.FaceTouchThresholdPercent
+	if percent < 50 || percent > 99 {
+		percent = 80
+	}
+	return float64(percent) / 100
+}
+
+func (e *Env) FaceTouchCooldown() time.Duration {
+	seconds := e.FaceTouchCooldownSeconds
+	if seconds < 5 {
+		seconds = 30
+	}
+	cooldown := time.Duration(seconds) * time.Second
+	if cooldown < e.FaceTouchInterval() {
+		return e.FaceTouchInterval()
+	}
+	return cooldown
 }
 
 func MustLoad() *Env {

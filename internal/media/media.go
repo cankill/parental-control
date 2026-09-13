@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,11 @@ const outputDir = "/tmp/pc"
 // открывающему камеру; brew-ffmpeg подписан ad-hoc и НЕ наследует грант агента.
 // Разворачивается и подписывается при деплое (init.sls / codesign.sh).
 const signedFFmpeg = "/opt/parentcontrol/ffmpeg"
+
+// AVFoundation camera access is exclusive on the target Mac. Presence checks,
+// face-touch sampling, and explicit /video requests must not start ffmpeg at
+// the same time.
+var cameraMu sync.Mutex
 
 // CaptureScreen takes a screenshot and returns its temporary path. The caller
 // must remove the file after sending it.
@@ -100,6 +106,9 @@ const cameraVideoSeconds = 5
 // CaptureVideo records a short silent camera clip and returns its temporary
 // MP4 path. The caller must remove the file after sending it.
 func CaptureVideo() (string, error) {
+	cameraMu.Lock()
+	defer cameraMu.Unlock()
+
 	ff, err := ffmpegPath()
 	if err != nil {
 		return "", err
@@ -143,6 +152,9 @@ const analysisFrameCount = 3
 // machine analysis. The caller must remove the images as soon as analysis
 // finishes; they must not be retained or sent as part of a presence check.
 func CaptureAnalysisFrames() ([]string, error) {
+	cameraMu.Lock()
+	defer cameraMu.Unlock()
+
 	ff, err := ffmpegPath()
 	if err != nil {
 		return nil, err

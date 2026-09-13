@@ -11,6 +11,7 @@ import (
 
 	"parental-control/internal/activity"
 	"parental-control/internal/bot"
+	"parental-control/internal/facetouch"
 	"parental-control/internal/lib/config"
 	"parental-control/internal/lib/types"
 	"parental-control/internal/presence"
@@ -69,14 +70,30 @@ func main() {
 			log.Printf("Presence settings fallback to deployment defaults: %s", err)
 		}
 
+		presenceSignal := presence.NewSignal()
+		faceTouchEvents := make(chan facetouch.Candidate, 8)
+		faceTouchStore, err := facetouch.OpenStore(facetouch.StorePath())
+		if err != nil {
+			log.Printf("Face-touch storage unavailable: %s", err)
+		}
+
 		wg.Add(1)
-		go bot.StartBot(ctx, statisticsCommandsChannel, presenceController)
+		go bot.StartBot(ctx, statisticsCommandsChannel, presenceController, faceTouchStore, faceTouchEvents)
 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			presence.Monitor(ctx, presenceController, inputSignal, statisticsCommandsChannel)
+			presence.Monitor(ctx, presenceController, inputSignal, statisticsCommandsChannel, presenceSignal)
 		}()
+
+		if faceTouchStore != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				facetouch.Monitor(ctx, presenceSignal, faceTouchStore, facetouch.NewOptions(
+					env.FaceTouchInterval(), env.FaceTouchThreshold(), env.FaceTouchCooldown()), faceTouchEvents)
+			}()
+		}
 
 		go func() {
 			<-sigs

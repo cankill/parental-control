@@ -7,6 +7,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"parental-control/internal/activity"
@@ -40,6 +41,41 @@ const (
 	EventReturned    EventKind = "returned"
 	EventUnavailable EventKind = "unavailable"
 )
+
+// Signal exposes only the current privacy-preserving presence state. Other
+// automatic features use it as a gate without gaining access to camera frames.
+type Signal struct {
+	mu      sync.RWMutex
+	state   State
+	updated time.Time
+}
+
+func NewSignal() *Signal { return &Signal{state: StateUnknown} }
+
+func (s *Signal) update(state State, at time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.state = state
+	s.updated = at
+	s.mu.Unlock()
+}
+
+func (s *Signal) Present() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.state == StatePresent
+}
+
+func (s *Signal) Snapshot() (State, time.Time) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.state, s.updated
+}
 
 type Event struct {
 	Kind  EventKind
@@ -210,7 +246,12 @@ func CheckCamera() (CameraCheck, error) {
 
 // Monitor observes presence until ctx is cancelled. State transitions are
 // recorded as privacy-preserving samples and never sent as proactive messages.
-func Monitor(ctx context.Context, controller *Controller, input *activity.InputSignal, samples chan<- types.AppCommand) {
+func Monitor(ctx context.Context, controller *Controller, input *activity.InputSignal, samples chan<- types.AppCommand, signals ...*Signal) {
+	var signal *Signal
+	if len(signals) > 0 {
+		signal = signals[0]
+	}
+	defer signal.update(StateUnknown, time.Now())
 	initial := controller.Snapshot(time.Now())
 	machine := newMachine(initial.MissThreshold)
 	ticker := time.NewTicker(initial.Interval)
@@ -246,8 +287,11 @@ func Monitor(ctx context.Context, controller *Controller, input *activity.InputS
 				}
 			}
 			if event := machine.observe(at, observation); event != nil {
+				signal.update(machine.state, at)
 				log.Printf("Presence transition: kind=%s state=%s at=%s since=%s", event.Kind, event.State,
 					event.At.Format(time.RFC3339), event.Since.Format(time.RFC3339))
+			} else {
+				signal.update(machine.state, at)
 			}
 		}
 	}

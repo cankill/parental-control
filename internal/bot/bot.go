@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"parental-control/internal/facetouch"
 	"parental-control/internal/lib/config"
 	"parental-control/internal/lib/types"
 	"parental-control/internal/presence"
@@ -24,12 +25,13 @@ type handlerRegistry struct {
 	stats     *statisticsClient
 	youtube   *youtubeTimer
 	presence  *presence.Controller
+	faceTouch *facetouch.Store
 	rich      *richClient
 	commands  map[string]handlerFunc
 	callbacks map[string]handlerFunc
 }
 
-func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceController *presence.Controller) {
+func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceController *presence.Controller, faceTouchStore *facetouch.Store, faceTouchEvents <-chan facetouch.Candidate) {
 	wg := ctx.Value(types.WgKey{}).(*sync.WaitGroup)
 	defer wg.Done()
 
@@ -61,6 +63,7 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceCon
 		stats:     newStatisticsClient(ctx, requests),
 		youtube:   newYoutubeTimer(ctx),
 		presence:  presenceController,
+		faceTouch: faceTouchStore,
 		rich:      newRichClient(telegramAPIURL, env.BotToken, nil),
 		commands:  make(map[string]handlerFunc),
 		callbacks: make(map[string]handlerFunc),
@@ -70,9 +73,16 @@ func StartBot(ctx context.Context, requests chan<- types.AppCommand, presenceCon
 	h.registerWebHandlers()
 	h.registerMediaHandlers()
 	h.registerYoutubeHandlers()
+	h.registerFaceTouchHandlers()
 	h.bindHandlers()
 
+	forwardDone := make(chan struct{})
+	go func() {
+		defer close(forwardDone)
+		h.forwardFaceTouchEvents(ctx, admins, faceTouchEvents)
+	}()
 	b.Start(ctx)
+	<-forwardDone
 	fmt.Println("Bot stopped")
 }
 
@@ -95,6 +105,7 @@ func botCommands() []models.BotCommand {
 		{Command: "presence_on", Description: "Enable presence: /presence_on [period]"},
 		{Command: "presence_off", Description: "Disable presence monitoring"},
 		{Command: "presence_status", Description: "Show presence parameters"},
+		{Command: "chin", Description: "Chin-touch detector statistics"},
 		{Command: "youtube", Description: "Block / unblock YouTube"},
 	}
 }
