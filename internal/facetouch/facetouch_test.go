@@ -1,17 +1,25 @@
 package facetouch
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
+
+	"parental-control/internal/vision"
 )
 
 func TestSelectCandidateRequiresTwoFramesAtThreshold(t *testing.T) {
-	frames := []analyzedFrame{{path: "one.jpg", score: 0.82}, {path: "two.jpg", score: 0.79}, {path: "three.jpg", score: 0.91}}
-	path, score, ok := selectCandidate(frames, 0.8, 2)
-	if !ok || path != "three.jpg" || score != 0.91 {
-		t.Fatalf("candidate = %q %.2f %v", path, score, ok)
+	frames := []analyzedFrame{
+		{path: "one.jpg", detection: vision.FaceTouchDetection{Score: 0.82}},
+		{path: "two.jpg", detection: vision.FaceTouchDetection{Score: 0.79}},
+		{path: "three.jpg", detection: vision.FaceTouchDetection{Score: 0.91}},
 	}
-	if _, _, ok := selectCandidate(frames[:2], 0.8, 2); ok {
+	best, ok := selectCandidate(frames, 0.8, 2)
+	if !ok || best.path != "three.jpg" || best.detection.Score != 0.91 {
+		t.Fatalf("candidate = %+v %v", best, ok)
+	}
+	if _, ok := selectCandidate(frames[:2], 0.8, 2); ok {
 		t.Fatal("single qualifying frame was accepted")
 	}
 }
@@ -82,6 +90,48 @@ func TestStoreRejectsUnsafeIDsAndLabels(t *testing.T) {
 	}
 	if _, err := store.SetLabel(record.ID, Label("other"), time.Now()); err == nil {
 		t.Fatal("unknown label was accepted")
+	}
+}
+
+func TestStoreRetainsLabeledPhotoAndDiagnosticMetadata(t *testing.T) {
+	store, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 9, 15, 9, 0, 0, 0, time.Local)
+	diagnostics := Diagnostics{PoseMode: "thumb-index", ChinProximity: 0.8, PinchCloseness: 0.7}
+	record, err := store.CreateCandidate(at, 0.76, diagnostics, []byte("jpeg-data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := os.ReadFile(store.imagePath(record.ID))
+	if err != nil || string(image) != "jpeg-data" {
+		t.Fatalf("stored image = %q, %v", image, err)
+	}
+	info, err := os.Stat(store.imagePath(record.ID))
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("stored image mode = %v, %v", info.Mode().Perm(), err)
+	}
+	if _, err := store.SetLabel(record.ID, LabelWatch, at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := os.ReadFile(store.datasetMetadataPath(record.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var labeled Record
+	if err := json.Unmarshal(metadata, &labeled); err != nil {
+		t.Fatal(err)
+	}
+	if labeled.Label != LabelWatch || labeled.Diagnostics.PoseMode != "thumb-index" || labeled.ImageFile == "" {
+		t.Fatalf("dataset metadata = %+v", labeled)
+	}
+	summary, err := store.Summary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Dataset != 1 || summary.DatasetLabeled != 1 {
+		t.Fatalf("dataset summary = %+v", summary)
 	}
 }
 

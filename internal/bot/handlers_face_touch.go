@@ -96,8 +96,9 @@ func (h *handlerRegistry) sendFaceTouchStats(c *updateContext) error {
 	if !summary.LatestAt.IsZero() {
 		latest = summary.LatestAt.Format("02.01 15:04")
 	}
-	text := fmt.Sprintf("Candidates: %d\n👍 Track: %d\n👎 Ignore: %d\nUnlabeled: %d\nAccepted among labeled: %d%%\nLatest: %s",
-		summary.Total, summary.Watch, summary.Ignore, summary.Pending, summary.AcceptedPercent(), latest)
+	text := fmt.Sprintf("Candidates: %d\n👍 Track: %d\n👎 Ignore: %d\nUnlabeled: %d\nAccepted among labeled: %d%%\nDataset: %d photos, %d labeled\nTarget: 50–100 labeled photos per class\nLatest: %s",
+		summary.Total, summary.Watch, summary.Ignore, summary.Pending, summary.AcceptedPercent(),
+		summary.Dataset, summary.DatasetLabeled, latest)
 	if summary.Legacy > 0 {
 		text += fmt.Sprintf("\nPrevious hand-near-chin candidates: %d", summary.Legacy)
 	}

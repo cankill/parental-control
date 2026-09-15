@@ -42,8 +42,8 @@ type Candidate struct {
 }
 
 type analyzedFrame struct {
-	path  string
-	score float64
+	path      string
+	detection vision.FaceTouchDetection
 }
 
 type monitor struct {
@@ -99,9 +99,9 @@ func (m *monitor) check(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		frames = append(frames, analyzedFrame{path: path, score: detection.Score})
+		frames = append(frames, analyzedFrame{path: path, detection: detection})
 	}
-	path, score, ok := selectCandidate(frames, m.options.Threshold, m.options.RequiredFrames)
+	best, ok := selectCandidate(frames, m.options.Threshold, m.options.RequiredFrames)
 	if !m.observeCandidate(ok) {
 		return nil
 	}
@@ -109,11 +109,11 @@ func (m *monitor) check(ctx context.Context) error {
 		m.latched = true
 		return nil
 	}
-	photo, err := os.ReadFile(path)
+	photo, err := os.ReadFile(best.path)
 	if err != nil {
 		return fmt.Errorf("read face-touch candidate: %w", err)
 	}
-	record, err := m.store.Create(now, score)
+	record, err := m.store.CreateCandidate(now, best.detection.Score, diagnosticsFromDetection(best.detection), photo)
 	if err != nil {
 		return err
 	}
@@ -142,20 +142,37 @@ func (m *monitor) observeCandidate(hit bool) bool {
 	return false
 }
 
-func selectCandidate(frames []analyzedFrame, threshold float64, required int) (string, float64, bool) {
+func selectCandidate(frames []analyzedFrame, threshold float64, required int) (analyzedFrame, bool) {
 	if required < 1 {
 		required = 1
 	}
 	hits := 0
 	best := analyzedFrame{}
 	for _, frame := range frames {
-		if frame.score < threshold {
+		if frame.detection.Score < threshold {
 			continue
 		}
 		hits++
-		if frame.score > best.score {
+		if frame.detection.Score > best.detection.Score {
 			best = frame
 		}
 	}
-	return best.path, best.score, hits >= required && best.path != ""
+	return best, hits >= required && best.path != ""
+}
+
+func diagnosticsFromDetection(detection vision.FaceTouchDetection) Diagnostics {
+	mode := "none"
+	switch detection.PoseMode {
+	case 1:
+		mode = "thumb-index"
+	case 2:
+		mode = "occluded-thumb-index-middle"
+	}
+	return Diagnostics{
+		PoseMode: mode, ChinProximity: detection.ChinProximity,
+		PinchCloseness: detection.PinchCloseness, LandmarkConfidence: detection.LandmarkConfidence,
+		NormalizedTipDistance: detection.NormalizedTipDistance, HandScale: detection.HandScale,
+		ThumbConfidence: detection.ThumbConfidence, IndexConfidence: detection.IndexConfidence,
+		MiddleConfidence: detection.MiddleConfidence,
+	}
 }

@@ -1,5 +1,5 @@
-// Package facetouch detects candidate pinch-near-chin events and stores only
-// their metadata and user-provided labels. Camera images are transient.
+// Package facetouch detects candidate pinch-near-chin events and stores a
+// private, labeled local dataset for later classifier training.
 package facetouch
 
 import (
@@ -22,24 +22,41 @@ const (
 	LabelIgnore  Label = "ignore"
 
 	DetectorPinchNearChinV1 = "pinch-near-chin-v1"
+	DetectorPinchNearChinV2 = "pinch-near-chin-v2"
 )
 
+type Diagnostics struct {
+	PoseMode              string  `json:"pose_mode"`
+	ChinProximity         float64 `json:"chin_proximity"`
+	PinchCloseness        float64 `json:"pinch_closeness"`
+	LandmarkConfidence    float64 `json:"landmark_confidence"`
+	NormalizedTipDistance float64 `json:"normalized_tip_distance"`
+	HandScale             float64 `json:"hand_scale"`
+	ThumbConfidence       float64 `json:"thumb_confidence"`
+	IndexConfidence       float64 `json:"index_confidence"`
+	MiddleConfidence      float64 `json:"middle_confidence"`
+}
+
 type Record struct {
-	ID         string    `json:"id"`
-	CapturedAt time.Time `json:"captured_at"`
-	Score      float64   `json:"score"`
-	Detector   string    `json:"detector,omitempty"`
-	Label      Label     `json:"label"`
-	LabeledAt  time.Time `json:"labeled_at,omitempty"`
+	ID          string      `json:"id"`
+	CapturedAt  time.Time   `json:"captured_at"`
+	Score       float64     `json:"score"`
+	Detector    string      `json:"detector,omitempty"`
+	ImageFile   string      `json:"image_file,omitempty"`
+	Diagnostics Diagnostics `json:"diagnostics,omitempty"`
+	Label       Label       `json:"label"`
+	LabeledAt   time.Time   `json:"labeled_at,omitempty"`
 }
 
 type Summary struct {
-	Total    int
-	Pending  int
-	Watch    int
-	Ignore   int
-	LatestAt time.Time
-	Legacy   int
+	Total          int
+	Pending        int
+	Watch          int
+	Ignore         int
+	LatestAt       time.Time
+	Legacy         int
+	Dataset        int
+	DatasetLabeled int
 }
 
 func (s Summary) Labeled() int { return s.Watch + s.Ignore }
@@ -52,8 +69,9 @@ func (s Summary) AcceptedPercent() int {
 }
 
 type Store struct {
-	mu   sync.Mutex
-	root string
+	mu        sync.Mutex
+	root      string
+	imageRoot string
 }
 
 var validID = regexp.MustCompile(`^[a-z0-9]+$`)
@@ -73,7 +91,14 @@ func OpenStore(root string) (*Store, error) {
 	if err := os.Chmod(root, 0700); err != nil {
 		return nil, fmt.Errorf("protect face-touch storage: %w", err)
 	}
-	return &Store{root: root}, nil
+	imageRoot := filepath.Join(root, "images")
+	if err := os.MkdirAll(imageRoot, 0700); err != nil {
+		return nil, fmt.Errorf("create face-touch image storage: %w", err)
+	}
+	if err := os.Chmod(imageRoot, 0700); err != nil {
+		return nil, fmt.Errorf("protect face-touch image storage: %w", err)
+	}
+	return &Store{root: root, imageRoot: imageRoot}, nil
 }
 
 func (s *Store) Create(at time.Time, score float64) (Record, error) {
@@ -85,11 +110,41 @@ func (s *Store) Create(at time.Time, score float64) (Record, error) {
 	}
 	record := Record{
 		ID: strconv.FormatInt(at.UnixNano(), 36), CapturedAt: at,
-		Score: score, Detector: DetectorPinchNearChinV1, Label: LabelPending,
+		Score: score, Detector: DetectorPinchNearChinV2, Label: LabelPending,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.writeLocked(record); err != nil {
+		return Record{}, err
+	}
+	return record, nil
+}
+
+func (s *Store) CreateCandidate(at time.Time, score float64, diagnostics Diagnostics, photo []byte) (Record, error) {
+	if s == nil {
+		return Record{}, errors.New("face-touch storage is unavailable")
+	}
+	if len(photo) == 0 {
+		return Record{}, errors.New("face-touch candidate photo is empty")
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	id := strconv.FormatInt(at.UnixNano(), 36)
+	record := Record{
+		ID: id, CapturedAt: at, Score: score, Detector: DetectorPinchNearChinV2,
+		ImageFile: filepath.ToSlash(filepath.Join("images", id+".jpg")), Diagnostics: diagnostics,
+		Label: LabelPending,
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	imagePath := s.imagePath(id)
+	if err := writeAtomic(s.imageRoot, ".face-touch-image-*", imagePath, photo); err != nil {
+		return Record{}, fmt.Errorf("store face-touch candidate photo: %w", err)
+	}
+	if err := s.writeLocked(record); err != nil {
+		_ = os.Remove(imagePath)
+		_ = os.Remove(s.datasetMetadataPath(id))
 		return Record{}, err
 	}
 	return record, nil
@@ -142,11 +197,17 @@ func (s *Store) Summary() (Summary, error) {
 		if err != nil {
 			continue
 		}
-		if record.Detector != DetectorPinchNearChinV1 {
+		if record.Detector != DetectorPinchNearChinV1 && record.Detector != DetectorPinchNearChinV2 {
 			summary.Legacy++
 			continue
 		}
 		summary.Total++
+		if record.ImageFile != "" {
+			summary.Dataset++
+			if record.Label == LabelWatch || record.Label == LabelIgnore {
+				summary.DatasetLabeled++
+			}
+		}
 		switch record.Label {
 		case LabelWatch:
 			summary.Watch++
@@ -163,6 +224,10 @@ func (s *Store) Summary() (Summary, error) {
 }
 
 func (s *Store) recordPath(id string) string { return filepath.Join(s.root, id+".json") }
+
+func (s *Store) imagePath(id string) string { return filepath.Join(s.imageRoot, id+".jpg") }
+
+func (s *Store) datasetMetadataPath(id string) string { return filepath.Join(s.imageRoot, id+".json") }
 
 func (s *Store) readLocked(id string) (Record, error) {
 	data, err := os.ReadFile(s.recordPath(id))
@@ -181,29 +246,41 @@ func (s *Store) writeLocked(record Record) error {
 	if err != nil {
 		return fmt.Errorf("encode face-touch record: %w", err)
 	}
-	temporary, err := os.CreateTemp(s.root, ".face-touch-*")
+	if record.ImageFile != "" {
+		if err := writeAtomic(s.imageRoot, ".face-touch-metadata-*", s.datasetMetadataPath(record.ID), data); err != nil {
+			return fmt.Errorf("write face-touch dataset metadata: %w", err)
+		}
+	}
+	if err := writeAtomic(s.root, ".face-touch-*", s.recordPath(record.ID), data); err != nil {
+		return fmt.Errorf("write face-touch record: %w", err)
+	}
+	return nil
+}
+
+func writeAtomic(directory, pattern, destination string, data []byte) error {
+	temporary, err := os.CreateTemp(directory, pattern)
 	if err != nil {
-		return fmt.Errorf("create temporary face-touch record: %w", err)
+		return err
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 	if err := temporary.Chmod(0600); err != nil {
 		_ = temporary.Close()
-		return fmt.Errorf("protect face-touch record: %w", err)
+		return err
 	}
 	if _, err := temporary.Write(data); err != nil {
 		_ = temporary.Close()
-		return fmt.Errorf("write face-touch record: %w", err)
+		return err
 	}
 	if err := temporary.Sync(); err != nil {
 		_ = temporary.Close()
-		return fmt.Errorf("sync face-touch record: %w", err)
+		return err
 	}
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close face-touch record: %w", err)
+		return err
 	}
-	if err := os.Rename(temporaryPath, s.recordPath(record.ID)); err != nil {
-		return fmt.Errorf("replace face-touch record: %w", err)
+	if err := os.Rename(temporaryPath, destination); err != nil {
+		return err
 	}
 	return nil
 }

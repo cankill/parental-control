@@ -79,14 +79,79 @@ static CGImageRef pc_load_image(const char *path, char **error_message) {
 	return image;
 }
 
-int pc_analyze_face_touch(const char *path, int *faces, int *hands, double *score, char **error_message) {
+static VNRecognizedPoint *pc_hand_point(VNHumanHandPoseObservation *hand, NSString *jointName) {
+	NSError *pointError = nil;
+	VNRecognizedPoint *point = [hand recognizedPointForJointName:jointName error:&pointError];
+	return pointError == nil ? point : nil;
+}
+
+static double pc_point_distance(VNRecognizedPoint *first, VNRecognizedPoint *second) {
+	return hypot(first.location.x - second.location.x, first.location.y - second.location.y);
+}
+
+static void pc_consider_pinch(
+	pc_face_touch_result *result,
+	VNFaceObservation *face,
+	double chinX,
+	double chinY,
+	VNRecognizedPoint *first,
+	VNRecognizedPoint *second,
+	double handScale,
+	double maximumNormalizedTipDistance,
+	double landmarkConfidence,
+	int poseMode,
+	double thumbConfidence,
+	double indexConfidence,
+	double middleConfidence
+) {
+	double tipDistance = pc_point_distance(first, second);
+	double maximumTipDistance = handScale * maximumNormalizedTipDistance;
+	if (maximumTipDistance <= 0 || tipDistance > maximumTipDistance) {
+		return;
+	}
+
+	double pinchX = (first.location.x + second.location.x) / 2.0;
+	double pinchY = (first.location.y + second.location.y) / 2.0;
+	double verticalOffset = (pinchY - chinY) / face.boundingBox.size.height;
+	if (verticalOffset < -0.26 || verticalOffset > 0.24) {
+		return;
+	}
+	double radiusX = face.boundingBox.size.width * 0.42;
+	double radiusY = face.boundingBox.size.height * 0.28;
+	double dx = (pinchX - chinX) / radiusX;
+	double dy = (pinchY - chinY) / radiusY;
+	double normalizedChinDistance = hypot(dx, dy);
+	if (normalizedChinDistance > 1.0) {
+		return;
+	}
+
+	double chinProximity = 1.0 - normalizedChinDistance;
+	double pinchCloseness = 1.0 - tipDistance / maximumTipDistance;
+	double confidence = fmin(face.confidence, landmarkConfidence);
+	// Geometry gates define the pose. The base score keeps valid but partially
+	// occluded fingertip clusters observable during dataset collection.
+	double candidate = 0.35 + 0.35 * chinProximity + 0.20 * pinchCloseness + 0.10 * confidence;
+	if (candidate <= result->score) {
+		return;
+	}
+	result->pose_mode = poseMode;
+	result->score = candidate;
+	result->chin_proximity = chinProximity;
+	result->pinch_closeness = pinchCloseness;
+	result->landmark_confidence = confidence;
+	result->normalized_tip_distance = tipDistance / handScale;
+	result->hand_scale = handScale;
+	result->thumb_confidence = thumbConfidence;
+	result->index_confidence = indexConfidence;
+	result->middle_confidence = middleConfidence;
+}
+
+int pc_analyze_face_touch(const char *path, pc_face_touch_result *result, char **error_message) {
 	@autoreleasepool {
-		if (path == NULL || faces == NULL || hands == NULL || score == NULL) {
+		if (path == NULL || result == NULL) {
 			return pc_vision_error(@"invalid face-touch analysis arguments", error_message);
 		}
-		*faces = 0;
-		*hands = 0;
-		*score = 0;
+		memset(result, 0, sizeof(*result));
 		if (error_message != NULL) {
 			*error_message = NULL;
 		}
@@ -106,8 +171,8 @@ int pc_analyze_face_touch(const char *path, int *faces, int *hands, double *scor
 		if (success) {
 			NSArray<VNFaceObservation *> *faceResults = faceRequest.results;
 			NSArray<VNHumanHandPoseObservation *> *handResults = handRequest.results;
-			*faces = (int)faceResults.count;
-			*hands = (int)handResults.count;
+			result->faces = (int)faceResults.count;
+			result->hands = (int)handResults.count;
 
 			for (VNFaceObservation *face in faceResults) {
 				VNFaceLandmarkRegion2D *contour = face.landmarks.faceContour;
@@ -125,37 +190,33 @@ int pc_analyze_face_touch(const char *path, int *faces, int *hands, double *scor
 					}
 				}
 
-				double radiusX = face.boundingBox.size.width * 0.42;
-				double radiusY = face.boundingBox.size.height * 0.32;
-				double maximumPinchDistance = face.boundingBox.size.width * 0.28;
 				for (VNHumanHandPoseObservation *hand in handResults) {
-					NSError *thumbError = nil;
-					NSError *indexError = nil;
-					VNRecognizedPoint *thumb = [hand recognizedPointForJointName:VNHumanHandPoseObservationJointNameThumbTip error:&thumbError];
-					VNRecognizedPoint *index = [hand recognizedPointForJointName:VNHumanHandPoseObservationJointNameIndexTip error:&indexError];
-					if (thumb == nil || index == nil || thumbError != nil || indexError != nil || thumb.confidence < 0.3 || index.confidence < 0.3) {
-						continue;
+					VNRecognizedPoint *thumb = pc_hand_point(hand, VNHumanHandPoseObservationJointNameThumbTip);
+					VNRecognizedPoint *index = pc_hand_point(hand, VNHumanHandPoseObservationJointNameIndexTip);
+					VNRecognizedPoint *middle = pc_hand_point(hand, VNHumanHandPoseObservationJointNameMiddleTip);
+					VNRecognizedPoint *wrist = pc_hand_point(hand, VNHumanHandPoseObservationJointNameWrist);
+					VNRecognizedPoint *middleMCP = pc_hand_point(hand, VNHumanHandPoseObservationJointNameMiddleMCP);
+					double thumbConfidence = thumb != nil ? thumb.confidence : 0;
+					double indexConfidence = index != nil ? index.confidence : 0;
+					double middleConfidence = middle != nil ? middle.confidence : 0;
+
+					double handScale = face.boundingBox.size.width;
+					if (wrist != nil && middleMCP != nil && wrist.confidence >= 0.3 && middleMCP.confidence >= 0.3) {
+						handScale = fmax(handScale, pc_point_distance(wrist, middleMCP));
 					}
 
-					double pinchDistance = hypot(thumb.location.x - index.location.x, thumb.location.y - index.location.y);
-					if (pinchDistance > maximumPinchDistance) {
-						continue;
+					if (thumb != nil && index != nil && thumbConfidence >= 0.3 && indexConfidence >= 0.3) {
+						pc_consider_pinch(result, face, chinX, chinY, thumb, index, handScale, 0.16,
+							fmin(thumbConfidence, indexConfidence), 1,
+							thumbConfidence, indexConfidence, middleConfidence);
 					}
-					double pinchX = (thumb.location.x + index.location.x) / 2.0;
-					double pinchY = (thumb.location.y + index.location.y) / 2.0;
-					double dx = (pinchX - chinX) / radiusX;
-					double dy = (pinchY - chinY) / radiusY;
-					double normalizedDistance = hypot(dx, dy);
-					if (normalizedDistance > 1.0) {
-						continue;
-					}
-
-					double chinProximity = 1.0 - normalizedDistance;
-					double pinchScore = 1.0 - pinchDistance / maximumPinchDistance;
-					double confidence = fmin(face.confidence, fmin(thumb.confidence, index.confidence));
-					double candidate = 0.50 * chinProximity + 0.35 * pinchScore + 0.15 * confidence;
-					if (candidate > *score) {
-						*score = candidate;
+					// When the thumb is partially hidden against the chin, Vision often
+					// maps the two visible fingertips to index and middle. Keep this
+					// fallback narrow and disable it for a confidently visible thumb.
+					if (thumbConfidence < 0.45 && index != nil && middle != nil && indexConfidence >= 0.25 && middleConfidence >= 0.25) {
+						pc_consider_pinch(result, face, chinX, chinY, index, middle, handScale, 0.20,
+							fmin(indexConfidence, middleConfidence), 2,
+							thumbConfidence, indexConfidence, middleConfidence);
 					}
 				}
 			}
