@@ -177,6 +177,29 @@ func (s *Store) SetLabel(id string, label Label, at time.Time) (Record, error) {
 	return record, nil
 }
 
+func (s *Store) ReadPhoto(id string) ([]byte, error) {
+	if s == nil {
+		return nil, errors.New("face-touch storage is unavailable")
+	}
+	if !validID.MatchString(id) {
+		return nil, errors.New("invalid face-touch event id")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, err := s.readLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	if record.ImageFile == "" {
+		return nil, errors.New("face-touch event has no stored photo")
+	}
+	photo, err := os.ReadFile(s.imagePath(id))
+	if err != nil {
+		return nil, fmt.Errorf("read face-touch candidate photo: %w", err)
+	}
+	return photo, nil
+}
+
 func (s *Store) Summary() (Summary, error) {
 	if s == nil {
 		return Summary{}, errors.New("face-touch storage is unavailable")

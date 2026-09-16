@@ -48,6 +48,26 @@ func renderFaceTouchCandidate(candidate facetouch.Candidate) models.InputRichMes
 		richCallbackButton("👎", faceTouchLabelAction, candidate.Record.ID+":"+string(facetouch.LabelIgnore)))
 }
 
+func renderLabeledFaceTouch(record facetouch.Record, photo []byte) models.InputRichMessage {
+	percent := int(math.Round(record.Score * 100))
+	caption := fmt.Sprintf("Pinch near chin\nScore: %d%%", percent)
+	icon := "❌"
+	if record.Label == facetouch.LabelWatch {
+		icon = "✅"
+	}
+	message := renderPhoto(bytes.NewReader(photo), "chin-"+record.ID+".jpg", caption)
+	message.Blocks = append(message.Blocks, models.InputRichBlock{
+		Type: models.RichBlockTypeButtons,
+		InputRichBlockButtons: &models.InputRichBlockButtons{
+			Buttons: []models.RichMessageButton{{
+				Text: richText(icon), Disabled: &models.DisabledButton{},
+			}},
+			Align: "right",
+		},
+	})
+	return message
+}
+
 func parseFaceTouchLabel(data string) (string, facetouch.Label, bool) {
 	id, labelText, ok := strings.Cut(data, ":")
 	if !ok || id == "" {
@@ -68,13 +88,22 @@ func (h *handlerRegistry) labelFaceTouch(c *updateContext) error {
 	if !ok {
 		return c.AnswerCallback("Invalid label", true)
 	}
-	if _, err := h.faceTouch.SetLabel(id, label, time.Now()); err != nil {
+	record, err := h.faceTouch.SetLabel(id, label, time.Now())
+	if err != nil {
 		return c.AnswerCallback("Could not save label", true)
 	}
-	if label == facetouch.LabelWatch {
-		return c.AnswerCallback("Saved: hair-plucking pose", false)
+	photo, err := h.faceTouch.ReadPhoto(id)
+	if err != nil {
+		return c.AnswerCallback("Label saved, but the photo is unavailable", true)
 	}
-	return c.AnswerCallback("Saved: other gesture", false)
+	answer := "Saved: other gesture"
+	if label == facetouch.LabelWatch {
+		answer = "Saved: hair-plucking pose"
+	}
+	if err := c.AnswerCallback(answer, false); err != nil {
+		log.Printf("Answer face-touch label callback failed: %s", err)
+	}
+	return c.EditRichMessage(renderLabeledFaceTouch(record, photo))
 }
 
 func (h *handlerRegistry) sendFaceTouchStats(c *updateContext) error {

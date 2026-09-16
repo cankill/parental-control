@@ -126,6 +126,13 @@ func TestStoreRetainsLabeledPhotoAndDiagnosticMetadata(t *testing.T) {
 	if labeled.Label != LabelWatch || labeled.Diagnostics.PoseMode != "thumb-index" || labeled.ImageFile == "" {
 		t.Fatalf("dataset metadata = %+v", labeled)
 	}
+	photo, err := store.ReadPhoto(record.ID)
+	if err != nil || string(photo) != "jpeg-data" {
+		t.Fatalf("read stored photo = %q, %v", photo, err)
+	}
+	if _, err := store.ReadPhoto("../escape"); err == nil {
+		t.Fatal("unsafe photo id was accepted")
+	}
 	summary, err := store.Summary()
 	if err != nil {
 		t.Fatal(err)

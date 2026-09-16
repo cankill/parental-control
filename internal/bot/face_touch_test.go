@@ -29,6 +29,35 @@ func TestRenderFaceTouchCandidateIncludesPhotoAndLabels(t *testing.T) {
 	}
 }
 
+func TestRenderLabeledFaceTouchRemovesChoiceAndShowsStatusAtBottomRight(t *testing.T) {
+	tests := []struct {
+		label facetouch.Label
+		icon  string
+	}{
+		{label: facetouch.LabelWatch, icon: "✅"},
+		{label: facetouch.LabelIgnore, icon: "❌"},
+	}
+	for _, test := range tests {
+		record := facetouch.Record{ID: "abc123", Score: 0.84, Label: test.label}
+		message := renderLabeledFaceTouch(record, []byte("jpeg"))
+		if len(message.Blocks) != 2 || message.Blocks[0].InputRichBlockPhoto == nil {
+			t.Fatalf("labeled message = %#v", message)
+		}
+		photo := message.Blocks[0].InputRichBlockPhoto
+		if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%" {
+			t.Fatalf("labeled caption = %q", photo.Caption.Text.PlainText)
+		}
+		status := message.Blocks[1].InputRichBlockButtons
+		if status == nil || status.Align != "right" || len(status.Buttons) != 1 {
+			t.Fatalf("status block = %#v", status)
+		}
+		button := status.Buttons[0]
+		if button.Text.PlainText != test.icon || button.Disabled == nil || button.CallbackData != "" {
+			t.Fatalf("status button = %#v", button)
+		}
+	}
+}
+
 func TestParseFaceTouchLabel(t *testing.T) {
 	id, label, ok := parseFaceTouchLabel("abc123:watch")
 	if !ok || id != "abc123" || label != facetouch.LabelWatch {
