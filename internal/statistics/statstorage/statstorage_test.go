@@ -34,7 +34,7 @@ func TestShouldTrackDomain(t *testing.T) {
 			t.Errorf("ShouldTrackDomain(%q) = true, want false", domain)
 		}
 	}
-	for _, domain := range []string{"example.com", "newtab.example.com", "blank.page"} {
+	for _, domain := range []string{"example.com", "newtab.example.com", "blank.page", "Local file"} {
 		if !ShouldTrackDomain(domain) {
 			t.Errorf("ShouldTrackDomain(%q) = false, want true", domain)
 		}

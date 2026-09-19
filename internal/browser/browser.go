@@ -92,7 +92,13 @@ func Domain(rawURL string) string {
 		return ""
 	}
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" {
+	if err != nil {
+		return ""
+	}
+	if strings.EqualFold(u.Scheme, "file") {
+		return "Local file"
+	}
+	if u.Host == "" {
 		return ""
 	}
 	return strings.TrimPrefix(u.Host, "www.")

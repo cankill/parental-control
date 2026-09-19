@@ -4,13 +4,15 @@ import "testing"
 
 func TestDomain(t *testing.T) {
 	cases := map[string]string{
-		"https://www.youtube.com/watch?v=abc": "youtube.com",
-		"https://github.com/user/repo":        "github.com",
-		"http://example.org":                  "example.org",
-		"https://sub.domain.co/path":          "sub.domain.co",
-		"":                                    "",
-		"not a url":                           "",
-		"about:blank":                         "",
+		"https://www.youtube.com/watch?v=abc":   "youtube.com",
+		"https://github.com/user/repo":          "github.com",
+		"http://example.org":                    "example.org",
+		"https://sub.domain.co/path":            "sub.domain.co",
+		"file:///Users/mark/Documents/work.pdf": "Local file",
+		"chrome://newtab/":                      "newtab",
+		"":                                      "",
+		"not a url":                             "",
+		"about:blank":                           "",
 	}
 	for in, want := range cases {
 		if got := Domain(in); got != want {
