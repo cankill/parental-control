@@ -73,6 +73,39 @@ func TestRenderActivityPresenceOutline(t *testing.T) {
 	assertNoPixelColorNear(t, img, int(x), int(y), presenceColor)
 }
 
+func TestRenderExactHourlyActivityReportsAtRealTimes(t *testing.T) {
+	start := time.Date(2026, 9, 19, 9, 0, 0, 0, time.Local)
+	resp := &types.ActivityResponse{
+		Period: types.ActivityHourly, TimeStamp: "2026-09-19T09",
+		PeriodStart: start, PeriodEnd: start.Add(time.Hour),
+		BucketSeconds: 300, Buckets: make([]types.ActivityBucket, 12),
+		Samples: []types.ActivitySample{
+			{At: start.Add(15 * time.Minute), Kind: types.ActivityKeyboard},
+			{At: start.Add(30 * time.Minute), Kind: types.ActivityMouse},
+		},
+	}
+	resp.Buckets[3] = types.ActivityBucket{KeyboardOnlySeconds: 1}
+	resp.Buckets[6] = types.ActivityBucket{MouseOnlySeconds: 1}
+	data, err := renderActivityPNG(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, y := activityPolarPoint(165, 0)
+	assertPixelColorNear(t, img, int(x), int(y), keyboardColor)
+	x, y = activityPolarPoint(305, math.Pi/2)
+	assertPixelColorNear(t, img, int(x), int(y), mouseColor)
+	assertNoPixelColorNear(t, img, 25, 28, totalColor)
+
+	caption := activityCaption(resp)
+	if len(caption.Array) != 2 || caption.Array[0].PlainText != "Hour: " || caption.Array[1].RichTextBold.Text.PlainText != "19.09 09:00" {
+		t.Fatalf("exact hourly caption = %#v", caption.Array)
+	}
+}
+
 func TestRenderActivityPeriods(t *testing.T) {
 	tests := []struct {
 		period  types.ActivityPeriod
@@ -122,6 +155,18 @@ func TestWriteActivityPreview(t *testing.T) {
 			{KeyboardOnlySeconds: 8, MouseOnlySeconds: 20, BothSeconds: 6},
 			{KeyboardOnlySeconds: 35, MouseOnlySeconds: 70, BothSeconds: 20},
 		},
+	}
+	for minute := 0; minute < 60; minute++ {
+		kind := types.ActivityKeyboard
+		if minute%3 == 0 {
+			kind = types.ActivityMouse
+		} else if minute%5 == 0 {
+			kind = types.ActivityBoth
+		}
+		hourly.Samples = append(hourly.Samples, types.ActivitySample{
+			At:   hourStart.Add(time.Duration(minute)*time.Minute + time.Duration((minute*7)%60)*time.Second),
+			Kind: kind,
+		})
 	}
 	dayStart := time.Date(2026, 7, 28, 0, 0, 0, 0, time.Local)
 	daily := &types.ActivityResponse{

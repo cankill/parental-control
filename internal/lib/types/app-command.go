@@ -80,6 +80,7 @@ type ActivityResponse struct {
 	PeriodEnd     time.Time
 	BucketSeconds int
 	Buckets       []ActivityBucket
+	Samples       []ActivitySample
 	Presence      []PresenceInterval
 	PeakSeconds   int
 	OlderShift    int

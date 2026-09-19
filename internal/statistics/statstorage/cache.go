@@ -107,6 +107,8 @@ func (i *periodIndex) addBucket(bucket string) {
 		i.addHour(i.domainHours, strings.TrimPrefix(bucket, domainBucketPrefix))
 	case strings.HasPrefix(bucket, activityBucketPrefix):
 		i.addHour(i.activityHours, strings.TrimPrefix(bucket, activityBucketPrefix))
+	case strings.HasPrefix(bucket, activityEventBucketPrefix):
+		i.addHour(i.activityHours, strings.TrimPrefix(bucket, activityEventBucketPrefix))
 	case strings.HasPrefix(bucket, presenceBucketPrefix):
 		i.addDay(i.presenceDays, strings.TrimPrefix(bucket, presenceBucketPrefix))
 	default:

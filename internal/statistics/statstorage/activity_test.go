@@ -93,6 +93,26 @@ func TestGetActivityGroupsHourDayAndWeek(t *testing.T) {
 	}
 }
 
+func TestHourlyActivityPreservesExactReportSeconds(t *testing.T) {
+	s := activityStorage(t)
+	start := time.Now().Truncate(time.Hour)
+	want := []types.ActivitySample{
+		{At: start.Add(4*time.Minute + 7*time.Second), Kind: types.ActivityKeyboard},
+		{At: start.Add(5*time.Minute + 42*time.Second), Kind: types.ActivityBoth},
+	}
+	s.AddActivity(want)
+
+	got := s.GetActivity(types.ActivityHourly, 0).Samples
+	if len(got) != len(want) {
+		t.Fatalf("exact samples = %+v", got)
+	}
+	for i := range want {
+		if !got[i].At.Equal(want[i].At) || got[i].Kind != want[i].Kind {
+			t.Fatalf("sample[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestGetActivityIncludesPresenceAndPresenceOnlyNavigation(t *testing.T) {
 	s := activityStorage(t)
 	now := time.Now()

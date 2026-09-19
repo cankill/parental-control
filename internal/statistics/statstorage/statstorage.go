@@ -8,6 +8,7 @@ import (
 	"parental-control/internal/appinfo"
 	"parental-control/internal/lib/storage/local/diskvstorage"
 	"parental-control/internal/lib/types"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,7 +24,28 @@ const (
 	TruncatedToDay      = "2006-01-02"
 )
 
-const activityBucketPrefix = "activity/"
+const (
+	activityBucketPrefix      = "activity/"
+	activityEventBucketPrefix = "activity-event/"
+)
+
+type storedActivityMinute struct {
+	Keyboard uint64 `json:"keyboard"`
+	Mouse    uint64 `json:"mouse"`
+}
+
+func (m *storedActivityMinute) add(second int, kind types.ActivityKind) {
+	if second < 0 || second >= 60 {
+		return
+	}
+	bit := uint64(1) << uint(second)
+	if kind == types.ActivityKeyboard || kind == types.ActivityBoth {
+		m.Keyboard |= bit
+	}
+	if kind == types.ActivityMouse || kind == types.ActivityBoth {
+		m.Mouse |= bit
+	}
+}
 
 type StatsStorage struct {
 	localStorage *diskvstorage.LocalStorage
@@ -404,9 +426,16 @@ func (s *StatsStorage) NearestDomainWeekShift(fromShift int, older bool) (int, b
 	return best, best != -1
 }
 
-// AddActivity stores one active second in its local five-minute bucket.
+// AddActivity stores aggregate five-minute totals for day/week reports and
+// exact per-second input marks for the hourly timeline.
 func (s *StatsStorage) AddActivity(samples []types.ActivitySample) {
 	writtenByHour := make(map[string]int)
+	type pendingActivityMinute struct {
+		bucket string
+		key    string
+		events storedActivityMinute
+	}
+	pendingMinutes := make(map[string]*pendingActivityMinute)
 	for _, sample := range samples {
 		minute := sample.At.Minute() / 5 * 5
 		hour := sample.At.Format(TruncatedToHour)
@@ -431,6 +460,26 @@ func (s *StatsStorage) AddActivity(samples []types.ActivitySample) {
 		data, _ := json.Marshal(bucket)
 		s.localStorage.SaveValue(bucketName, key, string(data))
 		writtenByHour[hour]++
+
+		eventBucket := activityEventBucketPrefix + hour
+		eventKey := fmt.Sprintf("%02d", sample.At.Minute())
+		pendingKey := eventBucket + "\x00" + eventKey
+		pending := pendingMinutes[pendingKey]
+		if pending == nil {
+			pending = &pendingActivityMinute{bucket: eventBucket, key: eventKey}
+			if raw := s.localStorage.GetValue(eventBucket, eventKey); raw != "" {
+				if err := json.Unmarshal([]byte(raw), &pending.events); err != nil {
+					fmt.Printf("activity: corrupt exact events %s/%s, replacing\n", eventBucket, eventKey)
+				}
+			}
+			pendingMinutes[pendingKey] = pending
+		}
+		pending.events.add(sample.At.Second(), sample.Kind)
+	}
+	for _, pending := range pendingMinutes {
+		data, _ := json.Marshal(pending.events)
+		s.localStorage.SaveValue(pending.bucket, pending.key, string(data))
+		s.noteBucket(pending.bucket)
 	}
 	for hour, seconds := range writtenByHour {
 		s.noteActivityWrite(hour, seconds)
@@ -486,6 +535,7 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 		resp.Buckets = s.loadActivityBuckets("activity:hour:"+hour, true, func() []types.ActivityBucket {
 			return s.readActivityHourUncached(hour)
 		})
+		resp.Samples = s.readActivitySamplesHour(hour)
 	}
 	presencePeriod := "hour"
 	if resp.Period == types.ActivityDaily {
@@ -545,6 +595,48 @@ func (s *StatsStorage) readActivityHourUncached(hour string) []types.ActivityBuc
 		}
 	}
 	return buckets
+}
+
+func (s *StatsStorage) readActivitySamplesHour(hour string) []types.ActivitySample {
+	start, err := time.ParseInLocation(TruncatedToHour, hour, time.Local)
+	if err != nil {
+		return nil
+	}
+	values := s.localStorage.GetValues(activityEventBucketPrefix + hour)
+	samples := make([]types.ActivitySample, 0)
+	for minuteText, raw := range values {
+		minute, err := strconv.Atoi(minuteText)
+		if err != nil || minute < 0 || minute >= 60 {
+			continue
+		}
+		var events storedActivityMinute
+		if err := json.Unmarshal([]byte(raw), &events); err != nil {
+			fmt.Printf("activity: skipping corrupt exact events %s/%s: %s\n", hour, minuteText, err)
+			continue
+		}
+		for second := 0; second < 60; second++ {
+			bit := uint64(1) << uint(second)
+			keyboard := events.Keyboard&bit != 0
+			mouse := events.Mouse&bit != 0
+			kind := types.ActivityNone
+			switch {
+			case keyboard && mouse:
+				kind = types.ActivityBoth
+			case keyboard:
+				kind = types.ActivityKeyboard
+			case mouse:
+				kind = types.ActivityMouse
+			}
+			if kind != types.ActivityNone {
+				samples = append(samples, types.ActivitySample{
+					At:   start.Add(time.Duration(minute)*time.Minute + time.Duration(second)*time.Second),
+					Kind: kind,
+				})
+			}
+		}
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i].At.Before(samples[j].At) })
+	return samples
 }
 
 func sumActivityBuckets(buckets []types.ActivityBucket) types.ActivityBucket {
