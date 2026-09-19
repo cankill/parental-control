@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"parental-control/internal/appinfo"
+	"parental-control/internal/browser"
 	"parental-control/internal/lib/types"
 	"parental-control/internal/statistics/statstorage"
 	"strings"
@@ -158,7 +159,15 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 				request.ResponseChan <- resp
 
 			case types.DomainEvent:
-				tick := alignDomainTick(command.(types.DomainTick), activeApplication, activatedAt)
+				tick := command.(types.DomainTick)
+				if correctedApplication, ok := verifiedBrowserApplication(activeApplication, tick); ok {
+					activatedAt = storage.IncreaseStatistics(activeApplication, activatedAt)
+					fmt.Printf("Active Application corrected by browser observation: %s -> %s\n", activeApplication, correctedApplication)
+					activeApplication = correctedApplication
+					storage.RememberApp(activeApplication)
+				} else {
+					tick = alignDomainTick(tick, activeApplication, activatedAt)
+				}
 				storage.AddDomainSample(activeApplication, tick)
 
 			case types.AppInfoCommand:
@@ -197,6 +206,14 @@ func Handler(ctx context.Context, activeApplication string, commandsChannel <-ch
 			}
 		}
 	}
+}
+
+func verifiedBrowserApplication(activeApplication string, tick types.DomainTick) (string, bool) {
+	if !tick.ForegroundVerified || !browser.IsBrowser(tick.BrowserBundleID) ||
+		strings.EqualFold(activeApplication, tick.BrowserBundleID) {
+		return "", false
+	}
+	return tick.BrowserBundleID, true
 }
 
 // alignDomainTick prevents the first poll after an application switch from

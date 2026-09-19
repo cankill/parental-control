@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"parental-control/internal/appinfo"
+	"parental-control/internal/browser"
 	"parental-control/internal/lib/storage/local/diskvstorage"
 	"parental-control/internal/lib/types"
 	"sort"
@@ -119,11 +120,12 @@ const (
 )
 
 type storedDomainUsage struct {
-	ActiveApplication string `json:"active_application"`
-	BrowserBundleID   string `json:"browser_bundle_id"`
-	Domain            string `json:"domain"`
-	RawMillis         int64  `json:"raw_millis"`
-	Millis            int64  `json:"millis"`
+	ActiveApplication  string `json:"active_application"`
+	BrowserBundleID    string `json:"browser_bundle_id"`
+	Domain             string `json:"domain"`
+	ForegroundVerified bool   `json:"foreground_verified,omitempty"`
+	RawMillis          int64  `json:"raw_millis"`
+	Millis             int64  `json:"millis"`
 }
 
 // AddDomainTime добавляет ms миллисекунд времени домена в текущий часовой bucket.
@@ -152,23 +154,25 @@ func (s *StatsStorage) AddDomainSample(activeApplication string, tick types.Doma
 		return
 	}
 
-	contextKey := activeApplication + "\x00" + tick.BrowserBundleID + "\x00" + tick.Domain
+	contextKey := activeApplication + "\x00" + tick.BrowserBundleID + "\x00" + tick.Domain + "\x00" + strconv.FormatBool(tick.ForegroundVerified)
 	hash := sha256.Sum256([]byte(contextKey))
 	key := fmt.Sprintf("%x", hash[:])
 	bucket := contextualDomainBucketPrefix + at.Format(TruncatedToHour)
 
 	usage := storedDomainUsage{
-		ActiveApplication: activeApplication,
-		BrowserBundleID:   tick.BrowserBundleID,
-		Domain:            tick.Domain,
+		ActiveApplication:  activeApplication,
+		BrowserBundleID:    tick.BrowserBundleID,
+		Domain:             tick.Domain,
+		ForegroundVerified: tick.ForegroundVerified,
 	}
 	if stored := s.localStorage.GetValue(bucket, key); stored != "" {
 		if err := json.Unmarshal([]byte(stored), &usage); err != nil {
 			fmt.Printf("domain: corrupt %s/%s, replacing: %s\n", bucket, key, err)
 			usage = storedDomainUsage{
-				ActiveApplication: activeApplication,
-				BrowserBundleID:   tick.BrowserBundleID,
-				Domain:            tick.Domain,
+				ActiveApplication:  activeApplication,
+				BrowserBundleID:    tick.BrowserBundleID,
+				Domain:             tick.Domain,
+				ForegroundVerified: tick.ForegroundVerified,
 			}
 		}
 	}
@@ -283,9 +287,7 @@ func mapContextualDomainsToAppInfos(values map[string]string) types.AppInfos {
 			fmt.Printf("domain: corrupt contextual value %s: %s, skipping\n", key, err)
 			continue
 		}
-		if !ShouldTrackApplication(usage.ActiveApplication) ||
-			!strings.EqualFold(usage.ActiveApplication, usage.BrowserBundleID) ||
-			!ShouldTrackDomain(usage.Domain) || usage.Millis <= 0 {
+		if !shouldTrackContextualDomain(usage) {
 			continue
 		}
 		totals[usage.Domain] += time.Duration(usage.Millis) * time.Millisecond
@@ -295,6 +297,17 @@ func mapContextualDomainsToAppInfos(values map[string]string) types.AppInfos {
 		stats = append(stats, types.AppInfo{Identity: domain, Duration: duration})
 	}
 	return stats
+}
+
+func shouldTrackContextualDomain(usage storedDomainUsage) bool {
+	if !ShouldTrackDomain(usage.Domain) || usage.Millis <= 0 {
+		return false
+	}
+	if usage.ForegroundVerified {
+		return browser.IsBrowser(usage.BrowserBundleID)
+	}
+	return ShouldTrackApplication(usage.ActiveApplication) &&
+		strings.EqualFold(usage.ActiveApplication, usage.BrowserBundleID)
 }
 
 func (s *StatsStorage) domainHours() []string {

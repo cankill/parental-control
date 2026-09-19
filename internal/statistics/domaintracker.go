@@ -44,11 +44,12 @@ func TrackDomains(ctx context.Context, interval time.Duration, commands chan<- t
 			measuredMillis := measuredDomainMillis(rawMillis, interval)
 			select {
 			case commands <- types.DomainTick{
-				At:              sampledAt,
-				BrowserBundleID: browserBundleID,
-				Domain:          domain,
-				RawMillis:       rawMillis,
-				Millis:          measuredMillis,
+				At:                 sampledAt,
+				BrowserBundleID:    browserBundleID,
+				Domain:             domain,
+				ForegroundVerified: err == nil,
+				RawMillis:          rawMillis,
+				Millis:             measuredMillis,
 			}:
 			case <-ctx.Done():
 			}

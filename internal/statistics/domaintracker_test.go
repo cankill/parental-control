@@ -64,3 +64,20 @@ func TestAlignDomainTickDoesNotCreditTimeBeforeBrowserActivation(t *testing.T) {
 		t.Fatalf("mismatched context changed raw observation: %d", unchanged.Millis)
 	}
 }
+
+func TestVerifiedBrowserApplicationCorrectsStaleForegroundState(t *testing.T) {
+	tick := types.DomainTick{BrowserBundleID: "com.google.Chrome", ForegroundVerified: true}
+	if got, ok := verifiedBrowserApplication("com.apple.loginwindow", tick); !ok || got != "com.google.Chrome" {
+		t.Fatalf("verified correction = (%q, %v)", got, ok)
+	}
+
+	tick.ForegroundVerified = false
+	if got, ok := verifiedBrowserApplication("com.apple.loginwindow", tick); ok || got != "" {
+		t.Fatalf("unverified observation corrected foreground = (%q, %v)", got, ok)
+	}
+
+	tick.ForegroundVerified = true
+	if got, ok := verifiedBrowserApplication("com.google.Chrome", tick); ok || got != "" {
+		t.Fatalf("matching observation reported correction = (%q, %v)", got, ok)
+	}
+}

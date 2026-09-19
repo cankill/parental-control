@@ -221,6 +221,9 @@ type DomainTick struct {
 	At              time.Time
 	BrowserBundleID string
 	Domain          string
+	// ForegroundVerified means the browser bundle identifier was obtained from
+	// a successful live frontmost-application query for this observation.
+	ForegroundVerified bool
 	// RawMillis is the complete wall-clock gap since the preceding poll. Millis
 	// is the measured portion attributable to this observation; long sleep or
 	// scheduling gaps are retained in RawMillis but not credited as activity.

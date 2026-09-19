@@ -188,10 +188,7 @@ func (s *StatsStorage) noteUsageWrite(bucket, identity string, milliseconds int6
 func (s *StatsStorage) noteContextualDomainWrite(hour string, usage storedDomainUsage) {
 	s.noteBucket(contextualDomainBucketPrefix + hour)
 	s.removeCached(cachePeriodKeys("sites", hour)...)
-	if s.index != nil && s.index.sitesScanned && usage.Millis > 0 &&
-		ShouldTrackApplication(usage.ActiveApplication) &&
-		strings.EqualFold(usage.ActiveApplication, usage.BrowserBundleID) &&
-		ShouldTrackDomain(usage.Domain) {
+	if s.index != nil && s.index.sitesScanned && shouldTrackContextualDomain(usage) {
 		s.index.availableSites[hour] = struct{}{}
 	}
 }

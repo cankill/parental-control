@@ -205,6 +205,7 @@ func TestContextualDomainSamplesAreStoredRawAndFilteredAtCalculation(t *testing.
 		{chrome, types.DomainTick{At: now, BrowserBundleID: chrome, Domain: "newtab", RawMillis: 3000, Millis: 3000}},
 		{"com.apple.Safari", types.DomainTick{At: now, BrowserBundleID: chrome, Domain: "stale.example.com", RawMillis: 3000, Millis: 3000}},
 		{chrome, types.DomainTick{At: now, BrowserBundleID: chrome, Domain: "work.example.com", RawMillis: 3000, Millis: 3000}},
+		{loginWindowBundleID, types.DomainTick{At: now, BrowserBundleID: chrome, Domain: "Local file", ForegroundVerified: true, RawMillis: 3000, Millis: 3000}},
 	}
 	for _, sample := range samples {
 		st.AddDomainSample(sample.active, sample.tick)
@@ -217,8 +218,8 @@ func TestContextualDomainSamplesAreStoredRawAndFilteredAtCalculation(t *testing.
 
 	bucket := contextualDomainBucketPrefix + now.Format(TruncatedToHour)
 	stored := st.localStorage.GetValues(bucket)
-	if len(stored) != 4 {
-		t.Fatalf("stored contextual samples = %d, want all 4 contexts", len(stored))
+	if len(stored) != 5 {
+		t.Fatalf("stored contextual samples = %d, want all 5 contexts", len(stored))
 	}
 	var locked storedDomainUsage
 	for _, raw := range stored {
@@ -235,13 +236,14 @@ func TestContextualDomainSamplesAreStoredRawAndFilteredAtCalculation(t *testing.
 	}
 
 	resp := st.GetDomainStatistics(0)
-	if len(resp.AppInfos) != 1 || resp.AppInfos[0].Identity != "work.example.com" || resp.AppInfos[0].Duration != 6*time.Second {
-		t.Fatalf("calculated domains = %+v, want only work.example.com for 6s", resp.AppInfos)
+	if len(resp.AppInfos) != 2 || resp.AppInfos[0].Identity != "work.example.com" || resp.AppInfos[0].Duration != 6*time.Second ||
+		resp.AppInfos[1].Identity != "Local file" || resp.AppInfos[1].Duration != 3*time.Second {
+		t.Fatalf("calculated domains = %+v, want work.example.com for 6s and verified Local file for 3s", resp.AppInfos)
 	}
-	if day := st.GetDomainStatisticsDay(0); len(day.AppInfos) != 1 || day.AppInfos[0].Duration != 6*time.Second {
+	if day := st.GetDomainStatisticsDay(0); len(day.AppInfos) != 2 || day.AppInfos[0].Duration != 6*time.Second || day.AppInfos[1].Duration != 3*time.Second {
 		t.Fatalf("daily contextual domains = %+v", day.AppInfos)
 	}
-	if week := st.GetDomainStatisticsWeek(0); len(week.AppInfos) != 1 || week.AppInfos[0].Duration != 6*time.Second {
+	if week := st.GetDomainStatisticsWeek(0); len(week.AppInfos) != 2 || week.AppInfos[0].Duration != 6*time.Second || week.AppInfos[1].Duration != 3*time.Second {
 		t.Fatalf("weekly contextual domains = %+v", week.AppInfos)
 	}
 	if _, ok := st.NearestDomainShift(0, true); ok {
