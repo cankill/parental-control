@@ -11,9 +11,7 @@ func (h *handlerRegistry) registerStatsHandlers() {
 	h.command("daily", h.sendDaily)
 	h.command("weekly", h.sendWeekly)
 	h.command("info", h.sendAppInfo)
-	h.command("stats", func(c *updateContext) error {
-		return c.SendRichMessage(renderStatsMenu())
-	})
+	h.command("stats", h.sendHourly)
 	h.callback("hub-hourly", h.hubAction(h.sendHourly))
 	h.callback("hub-daily", h.hubAction(h.sendDaily))
 	h.callback("hub-weekly", h.hubAction(h.sendWeekly))

@@ -30,7 +30,10 @@ func renderWeeklyWithSites(apps, sites *types.AppInfoResponse) models.InputRichM
 }
 
 func renderStatisticsWithSites(periodLabel string, apps, sites *types.AppInfoResponse, previousID, nextID string) models.InputRichMessage {
-	blocks := []models.InputRichBlock{richHeading(periodLabel + ": " + formatReportTimestamp(apps.TimeStamp))}
+	blocks := []models.InputRichBlock{
+		statisticsPeriodButtons(),
+		richHeading(periodLabel + ": " + formatReportTimestamp(apps.TimeStamp)),
+	}
 	appTable, hasApps := renderUsageTable("App", apps)
 	if hasApps {
 		blocks = append(blocks, appTable)
@@ -154,6 +157,14 @@ func renderStatsMenu() models.InputRichMessage {
 	)
 }
 
+func statisticsPeriodButtons() models.InputRichBlock {
+	return richButtons(
+		richCallbackButton("Hour", "hub-hourly"),
+		richCallbackButton("Day", "hub-daily"),
+		richCallbackButton("Week", "hub-weekly"),
+	)
+}
+
 func renderActivityMenu() models.InputRichMessage {
 	return renderMenu("Activity",
 		richCallbackButton("Hour", "activity-hourly"),
@@ -230,6 +241,7 @@ func renderPresenceReport(response *types.PresenceResponse) models.InputRichMess
 		periodLabel = "Week"
 	}
 	blocks := []models.InputRichBlock{
+		presencePeriodButtons(),
 		richHeading("Presence · " + periodLabel + ": " + formatReportTimestamp(response.TimeStamp)),
 	}
 	if response.MonitoredSeconds() == 0 {
@@ -306,10 +318,7 @@ func renderPresenceAbsenceTable(absences []types.PresenceAbsence) (models.InputR
 }
 
 func presenceReportButtons(response *types.PresenceResponse) []models.RichMessageButton {
-	buttons := []models.RichMessageButton{
-		richCallbackButton("Day", "presence-report-day"),
-		richCallbackButton("Week", "presence-report-week"),
-	}
+	buttons := []models.RichMessageButton{}
 	if response.HasOlder {
 		buttons = append(buttons, richCallbackButton("‹", "presence-report-prev", presenceReportTarget(response.Period, response.OlderShift)))
 	}
@@ -318,6 +327,13 @@ func presenceReportButtons(response *types.PresenceResponse) []models.RichMessag
 	}
 	buttons = append(buttons, richCallbackButton("Settings", "hub-presence-settings"))
 	return buttons
+}
+
+func presencePeriodButtons() models.InputRichBlock {
+	return richButtons(
+		richCallbackButton("Day", "presence-report-day"),
+		richCallbackButton("Week", "presence-report-week"),
+	)
 }
 
 func formatPresenceMinute(minute int) string {

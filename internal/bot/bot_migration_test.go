@@ -140,19 +140,23 @@ func TestRenderHourlyRichCombinesAppsSitesAndNavigation(t *testing.T) {
 	}
 
 	message := renderHourlyRich(apps, sites)
-	if len(message.Blocks) != 4 {
-		t.Fatalf("rich blocks = %d, want heading, two tables, and one navigation row", len(message.Blocks))
+	if len(message.Blocks) != 5 {
+		t.Fatalf("rich blocks = %d, want period selector, heading, two tables, and one navigation row", len(message.Blocks))
 	}
-	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Hour: 05.09 14:00" {
+	if got := message.Blocks[1].InputRichBlockSectionHeading.Text.PlainText; got != "Hour: 05.09 14:00" {
 		t.Fatalf("heading = %q", got)
 	}
-	if got := message.Blocks[1].InputRichBlockTable.Cells[0][0].Text.PlainText; got != "App" {
+	if got := message.Blocks[2].InputRichBlockTable.Cells[0][0].Text.PlainText; got != "App" {
 		t.Fatalf("first table identity = %q, want App", got)
 	}
-	if got := message.Blocks[2].InputRichBlockTable.Cells[0][0].Text.PlainText; got != "Site" {
+	if got := message.Blocks[3].InputRichBlockTable.Cells[0][0].Text.PlainText; got != "Site" {
 		t.Fatalf("second table identity = %q, want Site", got)
 	}
-	buttons := message.Blocks[3].InputRichBlockButtons.Buttons
+	periodButtons := message.Blocks[0].InputRichBlockButtons.Buttons
+	if len(periodButtons) != 3 || periodButtons[0].CallbackData != "\fhub-hourly" || periodButtons[2].CallbackData != "\fhub-weekly" {
+		t.Fatalf("period buttons = %#v", periodButtons)
+	}
+	buttons := message.Blocks[4].InputRichBlockButtons.Buttons
 	if len(buttons) != 2 {
 		t.Fatalf("navigation buttons = %#v", buttons)
 	}
@@ -165,13 +169,13 @@ func TestRenderHourlyRichEmptyUsesSiteTimeline(t *testing.T) {
 	apps := &types.AppInfoResponse{TimeStamp: "2026-09-05T14"}
 	sites := &types.AppInfoResponse{TimeStamp: "2026-09-05T14", HasOlder: true, OlderShift: 4}
 	message := renderHourlyRich(apps, sites)
-	if len(message.Blocks) != 3 {
-		t.Fatalf("rich blocks = %d, want heading, empty state, and navigation", len(message.Blocks))
+	if len(message.Blocks) != 4 {
+		t.Fatalf("rich blocks = %d, want period selector, heading, empty state, and navigation", len(message.Blocks))
 	}
-	if got := message.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "No Statistics" {
+	if got := message.Blocks[2].InputRichBlockParagraph.Text.PlainText; got != "No Statistics" {
 		t.Fatalf("empty state = %q", got)
 	}
-	buttons := message.Blocks[2].InputRichBlockButtons.Buttons
+	buttons := message.Blocks[3].InputRichBlockButtons.Buttons
 	if len(buttons) != 1 || buttons[0].CallbackData != "\fstat-prev|4" {
 		t.Fatalf("combined empty navigation = %#v", buttons)
 	}
@@ -183,10 +187,10 @@ func TestRenderHourlyRichOmitsEmptySitesTable(t *testing.T) {
 		AppInfos:  types.AppInfos{{Identity: "Chrome", Duration: time.Minute}},
 	}
 	message := renderHourlyRich(apps, &types.AppInfoResponse{TimeStamp: apps.TimeStamp})
-	if len(message.Blocks) != 2 {
-		t.Fatalf("rich blocks = %d, want heading and applications table", len(message.Blocks))
+	if len(message.Blocks) != 3 {
+		t.Fatalf("rich blocks = %d, want period selector, heading and applications table", len(message.Blocks))
 	}
-	if got := message.Blocks[1].InputRichBlockTable.Cells[0][0].Text.PlainText; got != "App" {
+	if got := message.Blocks[2].InputRichBlockTable.Cells[0][0].Text.PlainText; got != "App" {
 		t.Fatalf("only table identity = %q, want App", got)
 	}
 }
@@ -203,7 +207,7 @@ func TestRenderDailyAndWeeklyWithSitesUseSharedPeriodNavigation(t *testing.T) {
 		HasOlder:  true, OlderShift: 2,
 	}
 	daily := renderDailyWithSites(dailyApps, dailySites)
-	if got := daily.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Day: 05.09" {
+	if got := daily.Blocks[1].InputRichBlockSectionHeading.Text.PlainText; got != "Day: 05.09" {
 		t.Fatalf("daily heading = %q", got)
 	}
 	dailyButtons := daily.Blocks[len(daily.Blocks)-1].InputRichBlockButtons.Buttons
@@ -222,7 +226,7 @@ func TestRenderDailyAndWeeklyWithSitesUseSharedPeriodNavigation(t *testing.T) {
 		HasNewer:  true, NewerShift: 0,
 	}
 	weekly := renderWeeklyWithSites(weeklyApps, weeklySites)
-	if got := weekly.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Week: 31.08 - 06.09" {
+	if got := weekly.Blocks[1].InputRichBlockSectionHeading.Text.PlainText; got != "Week: 31.08 - 06.09" {
 		t.Fatalf("weekly heading = %q", got)
 	}
 	weeklyButtons := weekly.Blocks[len(weekly.Blocks)-1].InputRichBlockButtons.Buttons

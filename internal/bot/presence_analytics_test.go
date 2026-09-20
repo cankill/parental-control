@@ -22,20 +22,24 @@ func TestRenderDailyPresenceReport(t *testing.T) {
 		HasOlder: true, OlderShift: 1,
 	}
 	message := renderPresenceReport(response)
-	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Presence · Day: 07.09" {
+	if got := message.Blocks[1].InputRichBlockSectionHeading.Text.PlainText; got != "Presence · Day: 07.09" {
 		t.Fatalf("heading = %q", got)
 	}
-	metrics := message.Blocks[1].InputRichBlockParagraph.Text.PlainText
+	metrics := message.Blocks[2].InputRichBlockParagraph.Text.PlainText
 	for _, want := range []string{"Present: 6h", "Away: 2h", "Presence: 75%", "Absences: 1", "Longest away: 2h"} {
 		if !strings.Contains(metrics, want) {
 			t.Errorf("metrics %q do not contain %q", metrics, want)
 		}
 	}
-	if table := message.Blocks[2].InputRichBlockTable; table == nil || len(table.Cells) != 2 {
+	if table := message.Blocks[3].InputRichBlockTable; table == nil || len(table.Cells) != 2 {
 		t.Fatalf("absence table = %#v", table)
 	}
-	buttons := message.Blocks[3].InputRichBlockButtons.Buttons
-	if len(buttons) != 4 || buttons[2].CallbackData != "\fpresence-report-prev|1:1" {
+	periodButtons := message.Blocks[0].InputRichBlockButtons.Buttons
+	if len(periodButtons) != 2 || periodButtons[0].CallbackData != "\fpresence-report-day" || periodButtons[1].CallbackData != "\fpresence-report-week" {
+		t.Fatalf("period buttons = %#v", periodButtons)
+	}
+	buttons := message.Blocks[4].InputRichBlockButtons.Buttons
+	if len(buttons) != 2 || buttons[0].CallbackData != "\fpresence-report-prev|1:1" {
 		t.Fatalf("report buttons = %#v", buttons)
 	}
 }
@@ -46,15 +50,15 @@ func TestRenderWeeklyPresenceReportAndEmptyState(t *testing.T) {
 		PresentSeconds: 60, Days: []types.PresenceDaySummary{{Date: "2026-09-07", PresentSeconds: 60}},
 	}
 	message := renderPresenceReport(response)
-	if got := message.Blocks[0].InputRichBlockSectionHeading.Text.PlainText; got != "Presence · Week: 07.09 - 13.09" {
+	if got := message.Blocks[1].InputRichBlockSectionHeading.Text.PlainText; got != "Presence · Week: 07.09 - 13.09" {
 		t.Fatalf("heading = %q", got)
 	}
-	if table := message.Blocks[2].InputRichBlockTable; table == nil || len(table.Cells) != 2 {
+	if table := message.Blocks[3].InputRichBlockTable; table == nil || len(table.Cells) != 2 {
 		t.Fatalf("weekly table = %#v", table)
 	}
 
 	empty := renderPresenceReport(&types.PresenceResponse{Period: types.ActivityDaily, TimeStamp: "2026-09-06"})
-	if got := empty.Blocks[1].InputRichBlockParagraph.Text.PlainText; got != "No Presence Data" {
+	if got := empty.Blocks[2].InputRichBlockParagraph.Text.PlainText; got != "No Presence Data" {
 		t.Fatalf("empty state = %q", got)
 	}
 }

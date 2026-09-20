@@ -30,8 +30,12 @@ func (h *handlerRegistry) forwardFaceTouchEvents(ctx context.Context, admins []i
 			if !ok {
 				return
 			}
+			summary, err := h.faceTouch.Summary()
+			if err != nil {
+				log.Printf("Read face-touch labeling progress failed: %s", err)
+			}
 			for _, chatID := range admins {
-				message := renderFaceTouchCandidate(candidate)
+				message := renderFaceTouchCandidate(candidate, summary)
 				if err := h.rich.send(ctx, chatID, message, 0); err != nil {
 					log.Printf("Send face-touch candidate %s to %d failed: %s", candidate.Record.ID, chatID, err)
 				}
@@ -40,17 +44,17 @@ func (h *handlerRegistry) forwardFaceTouchEvents(ctx context.Context, admins []i
 	}
 }
 
-func renderFaceTouchCandidate(candidate facetouch.Candidate) models.InputRichMessage {
+func renderFaceTouchCandidate(candidate facetouch.Candidate, summary facetouch.Summary) models.InputRichMessage {
 	percent := int(math.Round(candidate.Record.Score * 100))
-	caption := fmt.Sprintf("Pinch near chin\nScore: %d%%\nIs this a hair-plucking pose?", percent)
+	caption := fmt.Sprintf("Pinch near chin\nScore: %d%%\n%s\nIs this a hair-plucking pose?", percent, faceTouchProgress(summary))
 	return renderPhoto(bytes.NewReader(candidate.Photo), "chin-"+candidate.Record.ID+".jpg", caption,
 		richCallbackButton("👍", faceTouchLabelAction, candidate.Record.ID+":"+string(facetouch.LabelWatch)),
 		richCallbackButton("👎", faceTouchLabelAction, candidate.Record.ID+":"+string(facetouch.LabelIgnore)))
 }
 
-func renderLabeledFaceTouch(record facetouch.Record, photo []byte) models.InputRichMessage {
+func renderLabeledFaceTouch(record facetouch.Record, photo []byte, summary facetouch.Summary) models.InputRichMessage {
 	percent := int(math.Round(record.Score * 100))
-	caption := fmt.Sprintf("Pinch near chin\nScore: %d%%", percent)
+	caption := fmt.Sprintf("Pinch near chin\nScore: %d%%\n%s", percent, faceTouchProgress(summary))
 	icon := "❌"
 	if record.Label == facetouch.LabelWatch {
 		icon = "✅"
@@ -66,6 +70,14 @@ func renderLabeledFaceTouch(record facetouch.Record, photo []byte) models.InputR
 		},
 	})
 	return message
+}
+
+func faceTouchProgress(summary facetouch.Summary) string {
+	remaining := summary.Dataset - summary.DatasetLabeled
+	if remaining < 0 {
+		remaining = 0
+	}
+	return fmt.Sprintf("Labeled: %d/%d\nRemaining: %d", summary.DatasetLabeled, summary.Dataset, remaining)
 }
 
 func parseFaceTouchLabel(data string) (string, facetouch.Label, bool) {
@@ -100,10 +112,14 @@ func (h *handlerRegistry) labelFaceTouch(c *updateContext) error {
 	if label == facetouch.LabelWatch {
 		answer = "Saved: hair-plucking pose"
 	}
+	summary, err := h.faceTouch.Summary()
+	if err != nil {
+		return c.AnswerCallback("Label saved, but progress is unavailable", true)
+	}
 	if err := c.AnswerCallback(answer, false); err != nil {
 		log.Printf("Answer face-touch label callback failed: %s", err)
 	}
-	return c.EditRichMessage(renderLabeledFaceTouch(record, photo))
+	return c.EditRichMessage(renderLabeledFaceTouch(record, photo, summary))
 }
 
 func (h *handlerRegistry) sendFaceTouchStats(c *updateContext) error {

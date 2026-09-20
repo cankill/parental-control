@@ -12,7 +12,8 @@ func TestRenderFaceTouchCandidateIncludesPhotoAndLabels(t *testing.T) {
 		Record: facetouch.Record{ID: "abc123", CapturedAt: time.Now(), Score: 0.84},
 		Photo:  []byte("jpeg"),
 	}
-	message := renderFaceTouchCandidate(candidate)
+	summary := facetouch.Summary{Dataset: 120, DatasetLabeled: 93}
+	message := renderFaceTouchCandidate(candidate, summary)
 	if len(message.Blocks) != 2 || message.Blocks[0].InputRichBlockPhoto == nil || message.Blocks[1].InputRichBlockButtons == nil {
 		t.Fatalf("candidate message = %#v", message)
 	}
@@ -20,7 +21,7 @@ func TestRenderFaceTouchCandidateIncludesPhotoAndLabels(t *testing.T) {
 	if photo.Photo.Media != "attach://chin-abc123.jpg" || photo.Caption == nil || photo.Caption.Text.PlainText == "" {
 		t.Fatalf("candidate photo = %#v", photo)
 	}
-	if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%\nIs this a hair-plucking pose?" {
+	if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%\nLabeled: 93/120\nRemaining: 27\nIs this a hair-plucking pose?" {
 		t.Fatalf("candidate caption = %q", photo.Caption.Text.PlainText)
 	}
 	buttons := message.Blocks[1].InputRichBlockButtons.Buttons
@@ -39,12 +40,13 @@ func TestRenderLabeledFaceTouchRemovesChoiceAndShowsStatusAtBottomRight(t *testi
 	}
 	for _, test := range tests {
 		record := facetouch.Record{ID: "abc123", Score: 0.84, Label: test.label}
-		message := renderLabeledFaceTouch(record, []byte("jpeg"))
+		summary := facetouch.Summary{Dataset: 120, DatasetLabeled: 94}
+		message := renderLabeledFaceTouch(record, []byte("jpeg"), summary)
 		if len(message.Blocks) != 2 || message.Blocks[0].InputRichBlockPhoto == nil {
 			t.Fatalf("labeled message = %#v", message)
 		}
 		photo := message.Blocks[0].InputRichBlockPhoto
-		if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%" {
+		if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%\nLabeled: 94/120\nRemaining: 26" {
 			t.Fatalf("labeled caption = %q", photo.Caption.Text.PlainText)
 		}
 		status := message.Blocks[1].InputRichBlockButtons
