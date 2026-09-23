@@ -12,7 +12,7 @@ func TestRenderFaceTouchCandidateIncludesPhotoAndLabels(t *testing.T) {
 		Record: facetouch.Record{ID: "abc123", CapturedAt: time.Now(), Score: 0.84},
 		Photo:  []byte("jpeg"),
 	}
-	summary := facetouch.Summary{Dataset: 120, DatasetLabeled: 93}
+	summary := facetouch.Summary{Dataset: 120, DatasetLabeled: 93, DatasetWatch: 44, DatasetIgnore: 49}
 	message := renderFaceTouchCandidate(candidate, summary)
 	if len(message.Blocks) != 2 || message.Blocks[0].InputRichBlockPhoto == nil || message.Blocks[1].InputRichBlockButtons == nil {
 		t.Fatalf("candidate message = %#v", message)
@@ -21,7 +21,7 @@ func TestRenderFaceTouchCandidateIncludesPhotoAndLabels(t *testing.T) {
 	if photo.Photo.Media != "attach://chin-abc123.jpg" || photo.Caption == nil || photo.Caption.Text.PlainText == "" {
 		t.Fatalf("candidate photo = %#v", photo)
 	}
-	if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%\nLabeled: 93/120\nRemaining: 27\nIs this a hair-plucking pose?" {
+	if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%\nLabeled: 93/120\nUnlabeled queue: 27\nTraining: 👍 44/50 · 👎 49/50\nCollection: active\nIs this a hair-plucking pose?" {
 		t.Fatalf("candidate caption = %q", photo.Caption.Text.PlainText)
 	}
 	buttons := message.Blocks[1].InputRichBlockButtons.Buttons
@@ -40,13 +40,13 @@ func TestRenderLabeledFaceTouchRemovesChoiceAndShowsStatusAtBottomRight(t *testi
 	}
 	for _, test := range tests {
 		record := facetouch.Record{ID: "abc123", Score: 0.84, Label: test.label}
-		summary := facetouch.Summary{Dataset: 120, DatasetLabeled: 94}
+		summary := facetouch.Summary{Dataset: 120, DatasetLabeled: 94, DatasetWatch: 50, DatasetIgnore: 50}
 		message := renderLabeledFaceTouch(record, []byte("jpeg"), summary)
 		if len(message.Blocks) != 2 || message.Blocks[0].InputRichBlockPhoto == nil {
 			t.Fatalf("labeled message = %#v", message)
 		}
 		photo := message.Blocks[0].InputRichBlockPhoto
-		if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%\nLabeled: 94/120\nRemaining: 26" {
+		if photo.Caption.Text.PlainText != "Pinch near chin\nScore: 84%\nLabeled: 94/120\nUnlabeled queue: 26\nTraining: 👍 50/50 · 👎 50/50\nCollection paused: training target reached" {
 			t.Fatalf("labeled caption = %q", photo.Caption.Text.PlainText)
 		}
 		status := message.Blocks[1].InputRichBlockButtons

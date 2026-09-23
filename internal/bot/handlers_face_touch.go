@@ -77,7 +77,15 @@ func faceTouchProgress(summary facetouch.Summary) string {
 	if remaining < 0 {
 		remaining = 0
 	}
-	return fmt.Sprintf("Labeled: %d/%d\nRemaining: %d", summary.DatasetLabeled, summary.Dataset, remaining)
+	collection := "Collection: active"
+	if summary.TrainingTargetReached() {
+		collection = "Collection paused: training target reached"
+	}
+	return fmt.Sprintf("Labeled: %d/%d\nUnlabeled queue: %d\nTraining: 👍 %d/%d · 👎 %d/%d\n%s",
+		summary.DatasetLabeled, summary.Dataset, remaining,
+		summary.DatasetWatch, facetouch.TrainingTargetPerClass,
+		summary.DatasetIgnore, facetouch.TrainingTargetPerClass,
+		collection)
 }
 
 func parseFaceTouchLabel(data string) (string, facetouch.Label, bool) {
@@ -141,9 +149,16 @@ func (h *handlerRegistry) sendFaceTouchStats(c *updateContext) error {
 	if !summary.LatestAt.IsZero() {
 		latest = summary.LatestAt.Format("02.01 15:04")
 	}
-	text := fmt.Sprintf("Candidates: %d\n👍 Track: %d\n👎 Ignore: %d\nUnlabeled: %d\nAccepted among labeled: %d%%\nDataset: %d photos, %d labeled\nTarget: 50–100 labeled photos per class\nLatest: %s",
+	collection := "Active"
+	if summary.TrainingTargetReached() {
+		collection = "Paused — training target reached"
+	}
+	text := fmt.Sprintf("Candidates: %d\n👍 Track: %d\n👎 Ignore: %d\nUnlabeled: %d\nAccepted among labeled: %d%%\nDataset: %d photos, %d labeled\nTraining photos: 👍 %d/%d · 👎 %d/%d\nCollection: %s\nLatest: %s",
 		summary.Total, summary.Watch, summary.Ignore, summary.Pending, summary.AcceptedPercent(),
-		summary.Dataset, summary.DatasetLabeled, latest)
+		summary.Dataset, summary.DatasetLabeled,
+		summary.DatasetWatch, facetouch.TrainingTargetPerClass,
+		summary.DatasetIgnore, facetouch.TrainingTargetPerClass,
+		collection, latest)
 	if summary.Legacy > 0 {
 		text += fmt.Sprintf("\nPrevious hand-near-chin candidates: %d", summary.Legacy)
 	}

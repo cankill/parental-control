@@ -137,8 +137,19 @@ func TestStoreRetainsLabeledPhotoAndDiagnosticMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.Dataset != 1 || summary.DatasetLabeled != 1 {
+	if summary.Dataset != 1 || summary.DatasetLabeled != 1 || summary.DatasetWatch != 1 || summary.DatasetIgnore != 0 {
 		t.Fatalf("dataset summary = %+v", summary)
+	}
+}
+
+func TestTrainingTargetRequiresEnoughPhotosInBothClasses(t *testing.T) {
+	summary := Summary{DatasetWatch: TrainingTargetPerClass, DatasetIgnore: TrainingTargetPerClass - 1}
+	if summary.TrainingTargetReached() {
+		t.Fatal("training target reached with too few ignore photos")
+	}
+	summary.DatasetIgnore++
+	if !summary.TrainingTargetReached() {
+		t.Fatal("training target not reached with both classes complete")
 	}
 }
 

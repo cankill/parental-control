@@ -47,16 +47,17 @@ type analyzedFrame struct {
 }
 
 type monitor struct {
-	presence Presence
-	store    *Store
-	options  Options
-	events   chan<- Candidate
-	lastSent time.Time
-	latched  bool
-	clear    int
-	capture  func() ([]string, error)
-	analyze  func(string) (vision.FaceTouchDetection, error)
-	now      func() time.Time
+	presence         Presence
+	store            *Store
+	options          Options
+	events           chan<- Candidate
+	lastSent         time.Time
+	latched          bool
+	clear            int
+	collectionPaused bool
+	capture          func() ([]string, error)
+	analyze          func(string) (vision.FaceTouchDetection, error)
+	now              func() time.Time
 }
 
 func Monitor(ctx context.Context, presence Presence, store *Store, options Options, events chan<- Candidate) {
@@ -82,6 +83,20 @@ func Monitor(ctx context.Context, presence Presence, store *Store, options Optio
 }
 
 func (m *monitor) check(ctx context.Context) error {
+	if m.collectionPaused {
+		return nil
+	}
+	if m.store != nil {
+		summary, err := m.store.Summary()
+		if err != nil {
+			return err
+		}
+		if summary.TrainingTargetReached() {
+			m.collectionPaused = true
+			log.Printf("Face-touch candidate collection paused: training target reached (%d watch, %d ignore)", summary.DatasetWatch, summary.DatasetIgnore)
+			return nil
+		}
+	}
 	now := m.now()
 	paths, err := m.capture()
 	if err != nil {

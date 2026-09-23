@@ -20,6 +20,9 @@ const (
 	LabelPending Label = "pending"
 	LabelWatch   Label = "watch"
 	LabelIgnore  Label = "ignore"
+	// TrainingTargetPerClass is the minimum labeled photo count needed before
+	// automatic candidate collection pauses for the first model iteration.
+	TrainingTargetPerClass = 50
 
 	DetectorPinchNearChinV1 = "pinch-near-chin-v1"
 	DetectorPinchNearChinV2 = "pinch-near-chin-v2"
@@ -57,6 +60,8 @@ type Summary struct {
 	Legacy         int
 	Dataset        int
 	DatasetLabeled int
+	DatasetWatch   int
+	DatasetIgnore  int
 }
 
 func (s Summary) Labeled() int { return s.Watch + s.Ignore }
@@ -66,6 +71,10 @@ func (s Summary) AcceptedPercent() int {
 		return 0
 	}
 	return (s.Watch*100 + s.Labeled()/2) / s.Labeled()
+}
+
+func (s Summary) TrainingTargetReached() bool {
+	return s.DatasetWatch >= TrainingTargetPerClass && s.DatasetIgnore >= TrainingTargetPerClass
 }
 
 type Store struct {
@@ -227,8 +236,13 @@ func (s *Store) Summary() (Summary, error) {
 		summary.Total++
 		if record.ImageFile != "" {
 			summary.Dataset++
-			if record.Label == LabelWatch || record.Label == LabelIgnore {
+			switch record.Label {
+			case LabelWatch:
 				summary.DatasetLabeled++
+				summary.DatasetWatch++
+			case LabelIgnore:
+				summary.DatasetLabeled++
+				summary.DatasetIgnore++
 			}
 		}
 		switch record.Label {
