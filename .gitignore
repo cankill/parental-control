@@ -29,6 +29,10 @@ go.work.sum
 out
 database
 
+# Locally trained private Core ML artifacts
+*.mlmodel
+*.mlmodelc
+
 # Claude Code
 .claude
 CLAUDE.md

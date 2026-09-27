@@ -28,9 +28,10 @@ type Env struct {
 	// Face-touch detection runs automatically while presence is confirmed.
 	// These deployment values tune sampling and notification deduplication;
 	// there is intentionally no Telegram enable/disable command.
-	FaceTouchIntervalSeconds  int `env:"FACE_TOUCH_INTERVAL_SECONDS" env-default:"10"`
-	FaceTouchThresholdPercent int `env:"FACE_TOUCH_THRESHOLD_PERCENT" env-default:"80"`
-	FaceTouchCooldownSeconds  int `env:"FACE_TOUCH_COOLDOWN_SECONDS" env-default:"30"`
+	FaceTouchIntervalSeconds       int `env:"FACE_TOUCH_INTERVAL_SECONDS" env-default:"10"`
+	FaceTouchThresholdPercent      int `env:"FACE_TOUCH_THRESHOLD_PERCENT" env-default:"80"`
+	FaceTouchModelThresholdPercent int `env:"FACE_TOUCH_MODEL_THRESHOLD_PERCENT" env-default:"80"`
+	FaceTouchCooldownSeconds       int `env:"FACE_TOUCH_COOLDOWN_SECONDS" env-default:"30"`
 }
 
 // UrlPollInterval — интервал опроса URL браузера, минимум 1с, дефолт 3с.
@@ -50,6 +51,14 @@ func (e *Env) FaceTouchInterval() time.Duration {
 
 func (e *Env) FaceTouchThreshold() float64 {
 	percent := e.FaceTouchThresholdPercent
+	if percent < 50 || percent > 99 {
+		percent = 80
+	}
+	return float64(percent) / 100
+}
+
+func (e *Env) FaceTouchModelThreshold() float64 {
+	percent := e.FaceTouchModelThresholdPercent
 	if percent < 50 || percent > 99 {
 		percent = 80
 	}

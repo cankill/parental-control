@@ -45,16 +45,14 @@ func (h *handlerRegistry) forwardFaceTouchEvents(ctx context.Context, admins []i
 }
 
 func renderFaceTouchCandidate(candidate facetouch.Candidate, summary facetouch.Summary) models.InputRichMessage {
-	percent := int(math.Round(candidate.Record.Score * 100))
-	caption := fmt.Sprintf("Pinch near chin\nScore: %d%%\n%s\nIs this a hair-plucking pose?", percent, faceTouchProgress(summary))
+	caption := fmt.Sprintf("Pinch near chin\n%s\n%s\nIs this a hair-plucking pose?", faceTouchScore(candidate.Record), faceTouchProgress(summary))
 	return renderPhoto(bytes.NewReader(candidate.Photo), "chin-"+candidate.Record.ID+".jpg", caption,
 		richCallbackButton("👍", faceTouchLabelAction, candidate.Record.ID+":"+string(facetouch.LabelWatch)),
 		richCallbackButton("👎", faceTouchLabelAction, candidate.Record.ID+":"+string(facetouch.LabelIgnore)))
 }
 
 func renderLabeledFaceTouch(record facetouch.Record, photo []byte, summary facetouch.Summary) models.InputRichMessage {
-	percent := int(math.Round(record.Score * 100))
-	caption := fmt.Sprintf("Pinch near chin\nScore: %d%%\n%s", percent, faceTouchProgress(summary))
+	caption := fmt.Sprintf("Pinch near chin\n%s\n%s", faceTouchScore(record), faceTouchProgress(summary))
 	icon := "❌"
 	if record.Label == facetouch.LabelWatch {
 		icon = "✅"
@@ -72,13 +70,22 @@ func renderLabeledFaceTouch(record facetouch.Record, photo []byte, summary facet
 	return message
 }
 
+func faceTouchScore(record facetouch.Record) string {
+	if record.Diagnostics.Classifier != "" {
+		return fmt.Sprintf("Model confidence: %d%%", int(math.Round(record.Diagnostics.ClassifierProbability*100)))
+	}
+	return fmt.Sprintf("Geometry score: %d%%", int(math.Round(record.Score*100)))
+}
+
 func faceTouchProgress(summary facetouch.Summary) string {
 	remaining := summary.Dataset - summary.DatasetLabeled
 	if remaining < 0 {
 		remaining = 0
 	}
 	collection := "Collection: active"
-	if summary.TrainingTargetReached() {
+	if summary.ModelReady {
+		collection = "Model: active · collection: active"
+	} else if summary.TrainingTargetReached() {
 		collection = "Collection paused: training target reached"
 	}
 	return fmt.Sprintf("Labeled: %d/%d\nUnlabeled queue: %d\nTraining: 👍 %d/%d · 👎 %d/%d\n%s",
@@ -150,15 +157,18 @@ func (h *handlerRegistry) sendFaceTouchStats(c *updateContext) error {
 		latest = summary.LatestAt.Format("02.01 15:04")
 	}
 	collection := "Active"
-	if summary.TrainingTargetReached() {
+	model := "Not installed"
+	if summary.ModelReady {
+		model = "ChinPinchClassifier v1 — active"
+	} else if summary.TrainingTargetReached() {
 		collection = "Paused — training target reached"
 	}
-	text := fmt.Sprintf("Candidates: %d\n👍 Track: %d\n👎 Ignore: %d\nUnlabeled: %d\nAccepted among labeled: %d%%\nDataset: %d photos, %d labeled\nTraining photos: 👍 %d/%d · 👎 %d/%d\nCollection: %s\nLatest: %s",
+	text := fmt.Sprintf("Candidates: %d\n👍 Track: %d\n👎 Ignore: %d\nUnlabeled: %d\nAccepted among labeled: %d%%\nDataset: %d photos, %d labeled\nTraining photos: 👍 %d/%d · 👎 %d/%d\nModel: %s\nCollection: %s\nLatest: %s",
 		summary.Total, summary.Watch, summary.Ignore, summary.Pending, summary.AcceptedPercent(),
 		summary.Dataset, summary.DatasetLabeled,
 		summary.DatasetWatch, facetouch.TrainingTargetPerClass,
 		summary.DatasetIgnore, facetouch.TrainingTargetPerClass,
-		collection, latest)
+		model, collection, latest)
 	if summary.Legacy > 0 {
 		text += fmt.Sprintf("\nPrevious hand-near-chin candidates: %d", summary.Legacy)
 	}

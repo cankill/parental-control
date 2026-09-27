@@ -4,7 +4,7 @@ package vision
 
 /*
 #cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework Foundation -framework CoreGraphics -framework ImageIO -framework Vision
+#cgo LDFLAGS: -framework Foundation -framework CoreGraphics -framework CoreML -framework ImageIO -framework Vision
 #include <stdlib.h>
 #include "detector.h"
 */
@@ -52,7 +52,9 @@ type FaceTouchDetection struct {
 	Faces                 int
 	Hands                 int
 	PoseMode              int
+	ClassifierAvailable   bool
 	Score                 float64
+	ClassifierScore       float64
 	ChinProximity         float64
 	PinchCloseness        float64
 	LandmarkConfidence    float64
@@ -61,17 +63,36 @@ type FaceTouchDetection struct {
 	ThumbConfidence       float64
 	IndexConfidence       float64
 	MiddleConfidence      float64
+	RegionX               float64
+	RegionY               float64
+	RegionWidth           float64
+	RegionHeight          float64
 }
 
 // AnalyzeFaceTouch detects face landmarks and hand pose locally, then scores
 // how closely a thumb-and-index pinch pose overlaps the chin region.
 func AnalyzeFaceTouch(path string) (FaceTouchDetection, error) {
+	return analyzeFaceTouch(path, "")
+}
+
+// AnalyzeFaceTouchWithModel applies the locally stored Core ML classifier to
+// the chin-area crop after the geometric Apple Vision gate has found a pose.
+func AnalyzeFaceTouchWithModel(path, modelPath string) (FaceTouchDetection, error) {
+	return analyzeFaceTouch(path, modelPath)
+}
+
+func analyzeFaceTouch(path, modelPath string) (FaceTouchDetection, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
+	var cModelPath *C.char
+	if modelPath != "" {
+		cModelPath = C.CString(modelPath)
+		defer C.free(unsafe.Pointer(cModelPath))
+	}
 
 	var result C.pc_face_touch_result
 	var errorMessage *C.char
-	if C.pc_analyze_face_touch(cPath, &result, &errorMessage) != 0 {
+	if C.pc_analyze_face_touch(cPath, cModelPath, &result, &errorMessage) != 0 {
 		if errorMessage == nil {
 			return FaceTouchDetection{}, fmt.Errorf("Apple Vision face-touch analysis failed")
 		}
@@ -80,10 +101,14 @@ func AnalyzeFaceTouch(path string) (FaceTouchDetection, error) {
 	}
 	return FaceTouchDetection{
 		Faces: int(result.faces), Hands: int(result.hands), PoseMode: int(result.pose_mode),
-		Score: float64(result.score), ChinProximity: float64(result.chin_proximity),
+		ClassifierAvailable: result.classifier_available != 0,
+		Score:               float64(result.score), ClassifierScore: float64(result.classifier_score),
+		ChinProximity:  float64(result.chin_proximity),
 		PinchCloseness: float64(result.pinch_closeness), LandmarkConfidence: float64(result.landmark_confidence),
 		NormalizedTipDistance: float64(result.normalized_tip_distance), HandScale: float64(result.hand_scale),
 		ThumbConfidence: float64(result.thumb_confidence), IndexConfidence: float64(result.index_confidence),
 		MiddleConfidence: float64(result.middle_confidence),
+		RegionX:          float64(result.region_x), RegionY: float64(result.region_y),
+		RegionWidth: float64(result.region_width), RegionHeight: float64(result.region_height),
 	}, nil
 }

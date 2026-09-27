@@ -16,14 +16,16 @@ type Presence interface {
 }
 
 type Options struct {
-	Interval       time.Duration
-	Threshold      float64
-	Cooldown       time.Duration
-	RequiredFrames int
+	Interval            time.Duration
+	Threshold           float64
+	ClassifierThreshold float64
+	ClassifierPath      string
+	Cooldown            time.Duration
+	RequiredFrames      int
 }
 
 func NewOptions(interval time.Duration, threshold float64, cooldown time.Duration) Options {
-	options := Options{Interval: interval, Threshold: threshold, Cooldown: cooldown, RequiredFrames: 2}
+	options := Options{Interval: interval, Threshold: threshold, ClassifierThreshold: 0.8, Cooldown: cooldown, RequiredFrames: 2}
 	if options.Interval < 5*time.Second {
 		options.Interval = 10 * time.Second
 	}
@@ -34,6 +36,14 @@ func NewOptions(interval time.Duration, threshold float64, cooldown time.Duratio
 		options.Cooldown = 30 * time.Second
 	}
 	return options
+}
+
+func (o Options) WithClassifier(path string, threshold float64) Options {
+	o.ClassifierPath = path
+	if threshold >= 0.5 && threshold <= 0.99 {
+		o.ClassifierThreshold = threshold
+	}
+	return o
 }
 
 type Candidate struct {
@@ -55,15 +65,26 @@ type monitor struct {
 	latched          bool
 	clear            int
 	collectionPaused bool
+	classifierReady  bool
 	capture          func() ([]string, error)
 	analyze          func(string) (vision.FaceTouchDetection, error)
 	now              func() time.Time
 }
 
 func Monitor(ctx context.Context, presence Presence, store *Store, options Options, events chan<- Candidate) {
+	options = NewOptions(options.Interval, options.Threshold, options.Cooldown).
+		WithClassifier(options.ClassifierPath, options.ClassifierThreshold)
+	classifierReady := modelExists(options.ClassifierPath)
+	analyze := vision.AnalyzeFaceTouch
+	if classifierReady {
+		analyze = func(path string) (vision.FaceTouchDetection, error) {
+			return vision.AnalyzeFaceTouchWithModel(path, options.ClassifierPath)
+		}
+		log.Printf("Face-touch Core ML classifier enabled: %s", options.ClassifierPath)
+	}
 	m := &monitor{
-		presence: presence, store: store, options: NewOptions(options.Interval, options.Threshold, options.Cooldown),
-		events: events, capture: media.CaptureAnalysisFrames, analyze: vision.AnalyzeFaceTouch, now: time.Now,
+		presence: presence, store: store, options: options, classifierReady: classifierReady,
+		events: events, capture: media.CaptureAnalysisFrames, analyze: analyze, now: time.Now,
 	}
 	ticker := time.NewTicker(m.options.Interval)
 	defer ticker.Stop()
@@ -91,7 +112,7 @@ func (m *monitor) check(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if summary.TrainingTargetReached() {
+		if summary.TrainingTargetReached() && !m.classifierReady {
 			m.collectionPaused = true
 			log.Printf("Face-touch candidate collection paused: training target reached (%d watch, %d ignore)", summary.DatasetWatch, summary.DatasetIgnore)
 			return nil
@@ -116,7 +137,7 @@ func (m *monitor) check(ctx context.Context) error {
 		}
 		frames = append(frames, analyzedFrame{path: path, detection: detection})
 	}
-	best, ok := selectCandidate(frames, m.options.Threshold, m.options.RequiredFrames)
+	best, ok := selectCandidate(frames, m.options.Threshold, m.options.ClassifierThreshold, m.classifierReady, m.options.RequiredFrames)
 	if !m.observeCandidate(ok) {
 		return nil
 	}
@@ -157,7 +178,7 @@ func (m *monitor) observeCandidate(hit bool) bool {
 	return false
 }
 
-func selectCandidate(frames []analyzedFrame, threshold float64, required int) (analyzedFrame, bool) {
+func selectCandidate(frames []analyzedFrame, threshold, classifierThreshold float64, requireClassifier bool, required int) (analyzedFrame, bool) {
 	if required < 1 {
 		required = 1
 	}
@@ -167,21 +188,42 @@ func selectCandidate(frames []analyzedFrame, threshold float64, required int) (a
 		if frame.detection.Score < threshold {
 			continue
 		}
+		if requireClassifier && (!frame.detection.ClassifierAvailable || frame.detection.ClassifierScore < classifierThreshold) {
+			continue
+		}
 		hits++
-		if frame.detection.Score > best.detection.Score {
+		candidateScore := frame.detection.Score
+		bestScore := best.detection.Score
+		if requireClassifier {
+			candidateScore = frame.detection.ClassifierScore
+			bestScore = best.detection.ClassifierScore
+		}
+		if candidateScore > bestScore {
 			best = frame
 		}
 	}
 	return best, hits >= required && best.path != ""
 }
 
+func modelExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func diagnosticsFromDetection(detection vision.FaceTouchDetection) Diagnostics {
 	mode := "none"
+	classifier := ""
 	switch detection.PoseMode {
 	case 1:
 		mode = "thumb-index"
 	case 2:
 		mode = "occluded-thumb-index-middle"
+	}
+	if detection.ClassifierAvailable {
+		classifier = ClassifierChinPinchV1
 	}
 	return Diagnostics{
 		PoseMode: mode, ChinProximity: detection.ChinProximity,
@@ -189,5 +231,9 @@ func diagnosticsFromDetection(detection vision.FaceTouchDetection) Diagnostics {
 		NormalizedTipDistance: detection.NormalizedTipDistance, HandScale: detection.HandScale,
 		ThumbConfidence: detection.ThumbConfidence, IndexConfidence: detection.IndexConfidence,
 		MiddleConfidence: detection.MiddleConfidence,
+		RegionX:          detection.RegionX, RegionY: detection.RegionY,
+		RegionWidth: detection.RegionWidth, RegionHeight: detection.RegionHeight,
+		ClassifierProbability: detection.ClassifierScore,
+		Classifier:            classifier,
 	}
 }

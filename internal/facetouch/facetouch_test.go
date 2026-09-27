@@ -15,12 +15,27 @@ func TestSelectCandidateRequiresTwoFramesAtThreshold(t *testing.T) {
 		{path: "two.jpg", detection: vision.FaceTouchDetection{Score: 0.79}},
 		{path: "three.jpg", detection: vision.FaceTouchDetection{Score: 0.91}},
 	}
-	best, ok := selectCandidate(frames, 0.8, 2)
+	best, ok := selectCandidate(frames, 0.8, 0.8, false, 2)
 	if !ok || best.path != "three.jpg" || best.detection.Score != 0.91 {
 		t.Fatalf("candidate = %+v %v", best, ok)
 	}
-	if _, ok := selectCandidate(frames[:2], 0.8, 2); ok {
+	if _, ok := selectCandidate(frames[:2], 0.8, 0.8, false, 2); ok {
 		t.Fatal("single qualifying frame was accepted")
+	}
+}
+
+func TestSelectCandidateUsesClassifierWhenInstalled(t *testing.T) {
+	frames := []analyzedFrame{
+		{path: "false-positive.jpg", detection: vision.FaceTouchDetection{Score: 0.93, ClassifierAvailable: true, ClassifierScore: 0.21}},
+		{path: "watch-one.jpg", detection: vision.FaceTouchDetection{Score: 0.71, ClassifierAvailable: true, ClassifierScore: 0.84}},
+		{path: "watch-two.jpg", detection: vision.FaceTouchDetection{Score: 0.68, ClassifierAvailable: true, ClassifierScore: 0.91}},
+	}
+	best, ok := selectCandidate(frames, 0.6, 0.8, true, 2)
+	if !ok || best.path != "watch-two.jpg" {
+		t.Fatalf("classifier candidate = %+v %v", best, ok)
+	}
+	if _, ok := selectCandidate(frames[:2], 0.6, 0.8, true, 2); ok {
+		t.Fatal("single classifier hit was accepted")
 	}
 }
 
@@ -179,7 +194,7 @@ func TestSummarySeparatesLegacyGenericCandidates(t *testing.T) {
 
 func TestOptionsUseConservativeDefaults(t *testing.T) {
 	options := NewOptions(0, 0, 0)
-	if options.Interval != 10*time.Second || options.Threshold != 0.8 || options.Cooldown != 30*time.Second || options.RequiredFrames != 2 {
+	if options.Interval != 10*time.Second || options.Threshold != 0.8 || options.ClassifierThreshold != 0.8 || options.Cooldown != 30*time.Second || options.RequiredFrames != 2 {
 		t.Fatalf("options = %+v", options)
 	}
 }

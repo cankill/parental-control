@@ -7,7 +7,9 @@ typedef struct {
     int faces;
     int hands;
     int pose_mode;
+    int classifier_available;
     double score;
+    double classifier_score;
     double chin_proximity;
     double pinch_closeness;
     double landmark_confidence;
@@ -16,8 +18,12 @@ typedef struct {
     double thumb_confidence;
     double index_confidence;
     double middle_confidence;
+    double region_x;
+    double region_y;
+    double region_width;
+    double region_height;
 } pc_face_touch_result;
 
-int pc_analyze_face_touch(const char *path, pc_face_touch_result *result, char **error_message);
+int pc_analyze_face_touch(const char *path, const char *model_path, pc_face_touch_result *result, char **error_message);
 
 #endif

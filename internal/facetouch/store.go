@@ -26,6 +26,8 @@ const (
 
 	DetectorPinchNearChinV1 = "pinch-near-chin-v1"
 	DetectorPinchNearChinV2 = "pinch-near-chin-v2"
+	ClassifierChinPinchV1   = "chin-pinch-classifier-v1"
+	classifierModelName     = "ChinPinchClassifier.mlmodelc"
 )
 
 type Diagnostics struct {
@@ -38,6 +40,12 @@ type Diagnostics struct {
 	ThumbConfidence       float64 `json:"thumb_confidence"`
 	IndexConfidence       float64 `json:"index_confidence"`
 	MiddleConfidence      float64 `json:"middle_confidence"`
+	Classifier            string  `json:"classifier,omitempty"`
+	ClassifierProbability float64 `json:"classifier_probability,omitempty"`
+	RegionX               float64 `json:"region_x,omitempty"`
+	RegionY               float64 `json:"region_y,omitempty"`
+	RegionWidth           float64 `json:"region_width,omitempty"`
+	RegionHeight          float64 `json:"region_height,omitempty"`
 }
 
 type Record struct {
@@ -62,6 +70,7 @@ type Summary struct {
 	DatasetLabeled int
 	DatasetWatch   int
 	DatasetIgnore  int
+	ModelReady     bool
 }
 
 func (s Summary) Labeled() int { return s.Watch + s.Ignore }
@@ -91,6 +100,10 @@ func StorePath() string {
 		database = "./database"
 	}
 	return filepath.Join(database, "face-touch")
+}
+
+func ModelPath() string {
+	return filepath.Join(StorePath(), "models", classifierModelName)
 }
 
 func OpenStore(root string) (*Store, error) {
@@ -219,7 +232,7 @@ func (s *Store) Summary() (Summary, error) {
 	if err != nil {
 		return Summary{}, fmt.Errorf("list face-touch records: %w", err)
 	}
-	var summary Summary
+	summary := Summary{ModelReady: s.modelReady()}
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -258,6 +271,14 @@ func (s *Store) Summary() (Summary, error) {
 		}
 	}
 	return summary, nil
+}
+
+func (s *Store) modelReady() bool {
+	if s == nil {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(s.root, "models", classifierModelName))
+	return err == nil && info.IsDir()
 }
 
 func (s *Store) recordPath(id string) string { return filepath.Join(s.root, id+".json") }

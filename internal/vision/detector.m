@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <ImageIO/ImageIO.h>
+#import <CoreML/CoreML.h>
 #import <Vision/Vision.h>
 #include <math.h>
 
@@ -89,6 +90,18 @@ static double pc_point_distance(VNRecognizedPoint *first, VNRecognizedPoint *sec
 	return hypot(first.location.x - second.location.x, first.location.y - second.location.y);
 }
 
+static void pc_set_chin_region(pc_face_touch_result *result, VNFaceObservation *face) {
+	double centerX = CGRectGetMidX(face.boundingBox);
+	double minX = fmax(0.0, centerX - face.boundingBox.size.width * 0.95);
+	double minY = fmax(0.0, CGRectGetMinY(face.boundingBox) - face.boundingBox.size.height * 0.42);
+	double maxX = fmin(1.0, centerX + face.boundingBox.size.width * 0.95);
+	double maxY = fmin(1.0, CGRectGetMinY(face.boundingBox) + face.boundingBox.size.height * 0.72);
+	result->region_x = minX;
+	result->region_y = minY;
+	result->region_width = maxX - minX;
+	result->region_height = maxY - minY;
+}
+
 static void pc_consider_pinch(
 	pc_face_touch_result *result,
 	VNFaceObservation *face,
@@ -144,9 +157,66 @@ static void pc_consider_pinch(
 	result->thumb_confidence = thumbConfidence;
 	result->index_confidence = indexConfidence;
 	result->middle_confidence = middleConfidence;
+	pc_set_chin_region(result, face);
 }
 
-int pc_analyze_face_touch(const char *path, pc_face_touch_result *result, char **error_message) {
+static VNCoreMLModel *pc_cached_classifier = nil;
+static NSString *pc_cached_classifier_path = nil;
+
+static VNCoreMLModel *pc_load_classifier(const char *model_path, NSError **model_error) {
+	if (model_path == NULL || model_path[0] == '\0') {
+		return nil;
+	}
+	NSString *requestedPath = [NSString stringWithUTF8String:model_path];
+	@synchronized([VNCoreMLModel class]) {
+		if (pc_cached_classifier != nil && [pc_cached_classifier_path isEqualToString:requestedPath]) {
+			return pc_cached_classifier;
+		}
+		MLModelConfiguration *configuration = [[MLModelConfiguration alloc] init];
+		configuration.computeUnits = MLComputeUnitsAll;
+		MLModel *model = [MLModel modelWithContentsOfURL:[NSURL fileURLWithPath:requestedPath]
+			configuration:configuration error:model_error];
+		[configuration release];
+		if (model == nil) {
+			return nil;
+		}
+		VNCoreMLModel *visionModel = [VNCoreMLModel modelForMLModel:model error:model_error];
+		if (visionModel == nil) {
+			return nil;
+		}
+		[pc_cached_classifier release];
+		[pc_cached_classifier_path release];
+		pc_cached_classifier = [visionModel retain];
+		pc_cached_classifier_path = [requestedPath copy];
+		return pc_cached_classifier;
+	}
+}
+
+static BOOL pc_classify_chin(CGImageRef image, const char *model_path, pc_face_touch_result *result, NSError **request_error) {
+	VNCoreMLModel *model = pc_load_classifier(model_path, request_error);
+	if (model == nil) {
+		return NO;
+	}
+	VNCoreMLRequest *request = [[VNCoreMLRequest alloc] initWithModel:model];
+	request.imageCropAndScaleOption = VNImageCropAndScaleOptionScaleFill;
+	request.regionOfInterest = CGRectMake(result->region_x, result->region_y, result->region_width, result->region_height);
+	VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];
+	BOOL success = [handler performRequests:@[request] error:request_error];
+	if (success) {
+		result->classifier_available = 1;
+		for (VNClassificationObservation *observation in request.results) {
+			if ([observation.identifier isEqualToString:@"watch"]) {
+				result->classifier_score = observation.confidence;
+				break;
+			}
+		}
+	}
+	[handler release];
+	[request release];
+	return success;
+}
+
+int pc_analyze_face_touch(const char *path, const char *model_path, pc_face_touch_result *result, char **error_message) {
 	@autoreleasepool {
 		if (path == NULL || result == NULL) {
 			return pc_vision_error(@"invalid face-touch analysis arguments", error_message);
@@ -219,6 +289,9 @@ int pc_analyze_face_touch(const char *path, pc_face_touch_result *result, char *
 							thumbConfidence, indexConfidence, middleConfidence);
 					}
 				}
+			}
+			if (result->score > 0 && model_path != NULL && model_path[0] != '\0') {
+				success = pc_classify_chin(image, model_path, result, &requestError);
 			}
 		}
 
