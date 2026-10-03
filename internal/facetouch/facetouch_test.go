@@ -15,11 +15,11 @@ func TestSelectCandidateRequiresTwoFramesAtThreshold(t *testing.T) {
 		{path: "two.jpg", detection: vision.FaceTouchDetection{Score: 0.79}},
 		{path: "three.jpg", detection: vision.FaceTouchDetection{Score: 0.91}},
 	}
-	best, ok := selectCandidate(frames, 0.8, 0.8, false, 2)
-	if !ok || best.path != "three.jpg" || best.detection.Score != 0.91 {
+	best, reason, ok := selectCandidate(frames, 0.8, 0.8, 0.4, false, 2)
+	if !ok || reason != ReviewAlert || best.path != "three.jpg" || best.detection.Score != 0.91 {
 		t.Fatalf("candidate = %+v %v", best, ok)
 	}
-	if _, ok := selectCandidate(frames[:2], 0.8, 0.8, false, 2); ok {
+	if _, _, ok := selectCandidate(frames[:2], 0.8, 0.8, 0.4, false, 2); ok {
 		t.Fatal("single qualifying frame was accepted")
 	}
 }
@@ -30,12 +30,40 @@ func TestSelectCandidateUsesClassifierWhenInstalled(t *testing.T) {
 		{path: "watch-one.jpg", detection: vision.FaceTouchDetection{Score: 0.71, ClassifierAvailable: true, ClassifierScore: 0.84}},
 		{path: "watch-two.jpg", detection: vision.FaceTouchDetection{Score: 0.68, ClassifierAvailable: true, ClassifierScore: 0.91}},
 	}
-	best, ok := selectCandidate(frames, 0.6, 0.8, true, 2)
-	if !ok || best.path != "watch-two.jpg" {
+	best, reason, ok := selectCandidate(frames, 0.6, 0.8, 0.4, true, 2)
+	if !ok || reason != ReviewAlert || best.path != "watch-two.jpg" {
 		t.Fatalf("classifier candidate = %+v %v", best, ok)
 	}
-	if _, ok := selectCandidate(frames[:2], 0.6, 0.8, true, 2); ok {
+	if _, _, ok := selectCandidate(frames[:2], 0.6, 0.8, 0.4, true, 2); ok {
 		t.Fatal("single classifier hit was accepted")
+	}
+}
+
+func TestSelectCandidateUsesUncertainFramesForActiveLearning(t *testing.T) {
+	frames := []analyzedFrame{
+		{path: "too-low.jpg", detection: vision.FaceTouchDetection{Score: 0.91, ClassifierAvailable: true, ClassifierScore: 0.31}},
+		{path: "uncertain-one.jpg", detection: vision.FaceTouchDetection{Score: 0.72, ClassifierAvailable: true, ClassifierScore: 0.54}},
+		{path: "uncertain-two.jpg", detection: vision.FaceTouchDetection{Score: 0.69, ClassifierAvailable: true, ClassifierScore: 0.73}},
+	}
+	best, reason, ok := selectCandidate(frames, 0.6, 0.8, 0.4, true, 2)
+	if !ok || reason != ReviewActiveLearning || best.path != "uncertain-two.jpg" {
+		t.Fatalf("active-learning candidate = %+v %q %v", best, reason, ok)
+	}
+	if _, _, ok := selectCandidate(frames[:2], 0.6, 0.8, 0.4, true, 2); ok {
+		t.Fatal("single uncertain frame was accepted")
+	}
+}
+
+func TestSelectCandidatePrefersAlertOverActiveLearning(t *testing.T) {
+	frames := []analyzedFrame{
+		{path: "uncertain-one.jpg", detection: vision.FaceTouchDetection{Score: 0.75, ClassifierAvailable: true, ClassifierScore: 0.74}},
+		{path: "uncertain-two.jpg", detection: vision.FaceTouchDetection{Score: 0.72, ClassifierAvailable: true, ClassifierScore: 0.70}},
+		{path: "alert-one.jpg", detection: vision.FaceTouchDetection{Score: 0.73, ClassifierAvailable: true, ClassifierScore: 0.82}},
+		{path: "alert-two.jpg", detection: vision.FaceTouchDetection{Score: 0.76, ClassifierAvailable: true, ClassifierScore: 0.91}},
+	}
+	best, reason, ok := selectCandidate(frames, 0.6, 0.8, 0.4, true, 2)
+	if !ok || reason != ReviewAlert || best.path != "alert-two.jpg" {
+		t.Fatalf("preferred candidate = %+v %q %v", best, reason, ok)
 	}
 }
 
@@ -115,7 +143,7 @@ func TestStoreRetainsLabeledPhotoAndDiagnosticMetadata(t *testing.T) {
 	}
 	at := time.Date(2026, 9, 15, 9, 0, 0, 0, time.Local)
 	diagnostics := Diagnostics{PoseMode: "thumb-index", ChinProximity: 0.8, PinchCloseness: 0.7}
-	record, err := store.CreateCandidate(at, 0.76, diagnostics, []byte("jpeg-data"))
+	record, err := store.CreateCandidateForReview(at, 0.76, diagnostics, ReviewActiveLearning, []byte("jpeg-data"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +166,7 @@ func TestStoreRetainsLabeledPhotoAndDiagnosticMetadata(t *testing.T) {
 	if err := json.Unmarshal(metadata, &labeled); err != nil {
 		t.Fatal(err)
 	}
-	if labeled.Label != LabelWatch || labeled.Diagnostics.PoseMode != "thumb-index" || labeled.ImageFile == "" {
+	if labeled.Label != LabelWatch || labeled.ReviewReason != ReviewActiveLearning || labeled.Diagnostics.PoseMode != "thumb-index" || labeled.ImageFile == "" {
 		t.Fatalf("dataset metadata = %+v", labeled)
 	}
 	photo, err := store.ReadPhoto(record.ID)
@@ -152,7 +180,7 @@ func TestStoreRetainsLabeledPhotoAndDiagnosticMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.Dataset != 1 || summary.DatasetLabeled != 1 || summary.DatasetWatch != 1 || summary.DatasetIgnore != 0 {
+	if summary.Dataset != 1 || summary.DatasetLabeled != 1 || summary.DatasetWatch != 1 || summary.DatasetIgnore != 0 || summary.ActiveLearningSamples != 1 {
 		t.Fatalf("dataset summary = %+v", summary)
 	}
 }
@@ -194,7 +222,7 @@ func TestSummarySeparatesLegacyGenericCandidates(t *testing.T) {
 
 func TestOptionsUseConservativeDefaults(t *testing.T) {
 	options := NewOptions(0, 0, 0)
-	if options.Interval != 10*time.Second || options.Threshold != 0.8 || options.ClassifierThreshold != 0.8 || options.Cooldown != 30*time.Second || options.RequiredFrames != 2 {
+	if options.Interval != 10*time.Second || options.Threshold != 0.8 || options.ClassifierThreshold != 0.8 || options.Cooldown != 30*time.Second || options.ActiveLearningMin != 0.4 || options.ActiveLearningCooldown != 30*time.Minute || options.RequiredFrames != 2 {
 		t.Fatalf("options = %+v", options)
 	}
 }

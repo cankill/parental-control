@@ -92,7 +92,8 @@ func main() {
 				defer wg.Done()
 				faceTouchOptions := facetouch.NewOptions(
 					env.FaceTouchInterval(), env.FaceTouchThreshold(), env.FaceTouchCooldown()).
-					WithClassifier(facetouch.ModelPath(), env.FaceTouchModelThreshold())
+					WithClassifier(facetouch.ModelPath(), env.FaceTouchModelThreshold()).
+					WithActiveLearning(env.FaceTouchActiveLearningMin(), env.FaceTouchActiveLearningCooldown())
 				facetouch.Monitor(ctx, presenceSignal, faceTouchStore, faceTouchOptions, faceTouchEvents)
 			}()
 		}

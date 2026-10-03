@@ -62,6 +62,23 @@ func TestRenderLabeledFaceTouchRemovesChoiceAndShowsStatusAtBottomRight(t *testi
 	}
 }
 
+func TestRenderActiveLearningCandidateKeepsItsTrainingTitleAfterLabeling(t *testing.T) {
+	record := facetouch.Record{
+		ID: "training123", Score: 0.74, ReviewReason: facetouch.ReviewActiveLearning,
+		Diagnostics: facetouch.Diagnostics{Classifier: facetouch.ClassifierChinPinchV1, ClassifierProbability: 0.63},
+	}
+	summary := facetouch.Summary{Dataset: 121, DatasetLabeled: 93, ModelReady: true}
+	message := renderFaceTouchCandidate(facetouch.Candidate{Record: record, Photo: []byte("jpeg")}, summary)
+	if got := message.Blocks[0].InputRichBlockPhoto.Caption.Text.PlainText; got[:len("Training sample")] != "Training sample" {
+		t.Fatalf("candidate title = %q", got)
+	}
+	record.Label = facetouch.LabelIgnore
+	labeled := renderLabeledFaceTouch(record, []byte("jpeg"), summary)
+	if got := labeled.Blocks[0].InputRichBlockPhoto.Caption.Text.PlainText; got[:len("Training sample")] != "Training sample" {
+		t.Fatalf("labeled title = %q", got)
+	}
+}
+
 func TestParseFaceTouchLabel(t *testing.T) {
 	id, label, ok := parseFaceTouchLabel("abc123:watch")
 	if !ok || id != "abc123" || label != facetouch.LabelWatch {

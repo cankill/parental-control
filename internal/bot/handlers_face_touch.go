@@ -45,14 +45,14 @@ func (h *handlerRegistry) forwardFaceTouchEvents(ctx context.Context, admins []i
 }
 
 func renderFaceTouchCandidate(candidate facetouch.Candidate, summary facetouch.Summary) models.InputRichMessage {
-	caption := fmt.Sprintf("Pinch near chin\n%s\n%s\nIs this a hair-plucking pose?", faceTouchScore(candidate.Record), faceTouchProgress(summary))
+	caption := fmt.Sprintf("%s\n%s\n%s\nIs this a hair-plucking pose?", faceTouchTitle(candidate.Record), faceTouchScore(candidate.Record), faceTouchProgress(summary))
 	return renderPhoto(bytes.NewReader(candidate.Photo), "chin-"+candidate.Record.ID+".jpg", caption,
 		richCallbackButton("👍", faceTouchLabelAction, candidate.Record.ID+":"+string(facetouch.LabelWatch)),
 		richCallbackButton("👎", faceTouchLabelAction, candidate.Record.ID+":"+string(facetouch.LabelIgnore)))
 }
 
 func renderLabeledFaceTouch(record facetouch.Record, photo []byte, summary facetouch.Summary) models.InputRichMessage {
-	caption := fmt.Sprintf("Pinch near chin\n%s\n%s", faceTouchScore(record), faceTouchProgress(summary))
+	caption := fmt.Sprintf("%s\n%s\n%s", faceTouchTitle(record), faceTouchScore(record), faceTouchProgress(summary))
 	icon := "❌"
 	if record.Label == facetouch.LabelWatch {
 		icon = "✅"
@@ -68,6 +68,13 @@ func renderLabeledFaceTouch(record facetouch.Record, photo []byte, summary facet
 		},
 	})
 	return message
+}
+
+func faceTouchTitle(record facetouch.Record) string {
+	if record.ReviewReason == facetouch.ReviewActiveLearning {
+		return "Training sample"
+	}
+	return "Pinch near chin"
 }
 
 func faceTouchScore(record facetouch.Record) string {
@@ -163,8 +170,8 @@ func (h *handlerRegistry) sendFaceTouchStats(c *updateContext) error {
 	} else if summary.TrainingTargetReached() {
 		collection = "Paused — training target reached"
 	}
-	text := fmt.Sprintf("Candidates: %d\n👍 Track: %d\n👎 Ignore: %d\nUnlabeled: %d\nAccepted among labeled: %d%%\nDataset: %d photos, %d labeled\nTraining photos: 👍 %d/%d · 👎 %d/%d\nModel: %s\nCollection: %s\nLatest: %s",
-		summary.Total, summary.Watch, summary.Ignore, summary.Pending, summary.AcceptedPercent(),
+	text := fmt.Sprintf("Candidates: %d\nModel alerts: %d\nActive-learning samples: %d\n👍 Track: %d\n👎 Ignore: %d\nUnlabeled: %d\nAccepted among labeled: %d%%\nDataset: %d photos, %d labeled\nTraining photos: 👍 %d/%d · 👎 %d/%d\nModel: %s\nCollection: %s\nLatest: %s",
+		summary.Total, summary.ModelAlerts, summary.ActiveLearningSamples, summary.Watch, summary.Ignore, summary.Pending, summary.AcceptedPercent(),
 		summary.Dataset, summary.DatasetLabeled,
 		summary.DatasetWatch, facetouch.TrainingTargetPerClass,
 		summary.DatasetIgnore, facetouch.TrainingTargetPerClass,

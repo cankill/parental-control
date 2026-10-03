@@ -15,11 +15,15 @@ import (
 )
 
 type Label string
+type ReviewReason string
 
 const (
 	LabelPending Label = "pending"
 	LabelWatch   Label = "watch"
 	LabelIgnore  Label = "ignore"
+
+	ReviewAlert          ReviewReason = "model-alert"
+	ReviewActiveLearning ReviewReason = "active-learning"
 	// TrainingTargetPerClass is the minimum labeled photo count needed before
 	// automatic candidate collection pauses for the first model iteration.
 	TrainingTargetPerClass = 50
@@ -49,28 +53,31 @@ type Diagnostics struct {
 }
 
 type Record struct {
-	ID          string      `json:"id"`
-	CapturedAt  time.Time   `json:"captured_at"`
-	Score       float64     `json:"score"`
-	Detector    string      `json:"detector,omitempty"`
-	ImageFile   string      `json:"image_file,omitempty"`
-	Diagnostics Diagnostics `json:"diagnostics,omitempty"`
-	Label       Label       `json:"label"`
-	LabeledAt   time.Time   `json:"labeled_at,omitempty"`
+	ID           string       `json:"id"`
+	CapturedAt   time.Time    `json:"captured_at"`
+	Score        float64      `json:"score"`
+	Detector     string       `json:"detector,omitempty"`
+	ImageFile    string       `json:"image_file,omitempty"`
+	Diagnostics  Diagnostics  `json:"diagnostics,omitempty"`
+	ReviewReason ReviewReason `json:"review_reason,omitempty"`
+	Label        Label        `json:"label"`
+	LabeledAt    time.Time    `json:"labeled_at,omitempty"`
 }
 
 type Summary struct {
-	Total          int
-	Pending        int
-	Watch          int
-	Ignore         int
-	LatestAt       time.Time
-	Legacy         int
-	Dataset        int
-	DatasetLabeled int
-	DatasetWatch   int
-	DatasetIgnore  int
-	ModelReady     bool
+	Total                 int
+	Pending               int
+	Watch                 int
+	Ignore                int
+	LatestAt              time.Time
+	Legacy                int
+	Dataset               int
+	DatasetLabeled        int
+	DatasetWatch          int
+	DatasetIgnore         int
+	ModelReady            bool
+	ModelAlerts           int
+	ActiveLearningSamples int
 }
 
 func (s Summary) Labeled() int { return s.Watch + s.Ignore }
@@ -143,6 +150,10 @@ func (s *Store) Create(at time.Time, score float64) (Record, error) {
 }
 
 func (s *Store) CreateCandidate(at time.Time, score float64, diagnostics Diagnostics, photo []byte) (Record, error) {
+	return s.CreateCandidateForReview(at, score, diagnostics, ReviewAlert, photo)
+}
+
+func (s *Store) CreateCandidateForReview(at time.Time, score float64, diagnostics Diagnostics, reason ReviewReason, photo []byte) (Record, error) {
 	if s == nil {
 		return Record{}, errors.New("face-touch storage is unavailable")
 	}
@@ -152,11 +163,14 @@ func (s *Store) CreateCandidate(at time.Time, score float64, diagnostics Diagnos
 	if at.IsZero() {
 		at = time.Now()
 	}
+	if reason != ReviewActiveLearning {
+		reason = ReviewAlert
+	}
 	id := strconv.FormatInt(at.UnixNano(), 36)
 	record := Record{
 		ID: id, CapturedAt: at, Score: score, Detector: DetectorPinchNearChinV2,
 		ImageFile: filepath.ToSlash(filepath.Join("images", id+".jpg")), Diagnostics: diagnostics,
-		Label: LabelPending,
+		ReviewReason: reason, Label: LabelPending,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -247,6 +261,18 @@ func (s *Store) Summary() (Summary, error) {
 			continue
 		}
 		summary.Total++
+		switch record.ReviewReason {
+		case ReviewAlert:
+			summary.ModelAlerts++
+		case ReviewActiveLearning:
+			summary.ActiveLearningSamples++
+		default:
+			// Records created before review reasons were introduced remain
+			// attributable when they already contain classifier diagnostics.
+			if record.Diagnostics.Classifier != "" {
+				summary.ModelAlerts++
+			}
+		}
 		if record.ImageFile != "" {
 			summary.Dataset++
 			switch record.Label {

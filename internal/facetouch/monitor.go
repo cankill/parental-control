@@ -16,16 +16,22 @@ type Presence interface {
 }
 
 type Options struct {
-	Interval            time.Duration
-	Threshold           float64
-	ClassifierThreshold float64
-	ClassifierPath      string
-	Cooldown            time.Duration
-	RequiredFrames      int
+	Interval               time.Duration
+	Threshold              float64
+	ClassifierThreshold    float64
+	ClassifierPath         string
+	Cooldown               time.Duration
+	ActiveLearningMin      float64
+	ActiveLearningCooldown time.Duration
+	RequiredFrames         int
 }
 
 func NewOptions(interval time.Duration, threshold float64, cooldown time.Duration) Options {
-	options := Options{Interval: interval, Threshold: threshold, ClassifierThreshold: 0.8, Cooldown: cooldown, RequiredFrames: 2}
+	options := Options{
+		Interval: interval, Threshold: threshold, ClassifierThreshold: 0.8,
+		Cooldown: cooldown, ActiveLearningMin: 0.4,
+		ActiveLearningCooldown: 30 * time.Minute, RequiredFrames: 2,
+	}
 	if options.Interval < 5*time.Second {
 		options.Interval = 10 * time.Second
 	}
@@ -46,6 +52,16 @@ func (o Options) WithClassifier(path string, threshold float64) Options {
 	return o
 }
 
+func (o Options) WithActiveLearning(minimum float64, cooldown time.Duration) Options {
+	if minimum >= 0.1 && minimum < o.ClassifierThreshold {
+		o.ActiveLearningMin = minimum
+	}
+	if cooldown >= o.Interval {
+		o.ActiveLearningCooldown = cooldown
+	}
+	return o
+}
+
 type Candidate struct {
 	Record Record
 	Photo  []byte
@@ -62,6 +78,7 @@ type monitor struct {
 	options          Options
 	events           chan<- Candidate
 	lastSent         time.Time
+	lastLearningSent time.Time
 	latched          bool
 	clear            int
 	collectionPaused bool
@@ -73,7 +90,8 @@ type monitor struct {
 
 func Monitor(ctx context.Context, presence Presence, store *Store, options Options, events chan<- Candidate) {
 	options = NewOptions(options.Interval, options.Threshold, options.Cooldown).
-		WithClassifier(options.ClassifierPath, options.ClassifierThreshold)
+		WithClassifier(options.ClassifierPath, options.ClassifierThreshold).
+		WithActiveLearning(options.ActiveLearningMin, options.ActiveLearningCooldown)
 	classifierReady := modelExists(options.ClassifierPath)
 	analyze := vision.AnalyzeFaceTouch
 	if classifierReady {
@@ -137,11 +155,16 @@ func (m *monitor) check(ctx context.Context) error {
 		}
 		frames = append(frames, analyzedFrame{path: path, detection: detection})
 	}
-	best, ok := selectCandidate(frames, m.options.Threshold, m.options.ClassifierThreshold, m.classifierReady, m.options.RequiredFrames)
+	best, reason, ok := selectCandidate(frames, m.options.Threshold, m.options.ClassifierThreshold,
+		m.options.ActiveLearningMin, m.classifierReady, m.options.RequiredFrames)
 	if !m.observeCandidate(ok) {
 		return nil
 	}
-	if !m.lastSent.IsZero() && now.Sub(m.lastSent) < m.options.Cooldown {
+	lastSent, cooldown := m.lastSent, m.options.Cooldown
+	if reason == ReviewActiveLearning {
+		lastSent, cooldown = m.lastLearningSent, m.options.ActiveLearningCooldown
+	}
+	if !lastSent.IsZero() && now.Sub(lastSent) < cooldown {
 		m.latched = true
 		return nil
 	}
@@ -149,14 +172,18 @@ func (m *monitor) check(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read face-touch candidate: %w", err)
 	}
-	record, err := m.store.CreateCandidate(now, best.detection.Score, diagnosticsFromDetection(best.detection), photo)
+	record, err := m.store.CreateCandidateForReview(now, best.detection.Score, diagnosticsFromDetection(best.detection), reason, photo)
 	if err != nil {
 		return err
 	}
 	candidate := Candidate{Record: record, Photo: photo}
 	select {
 	case m.events <- candidate:
-		m.lastSent = now
+		if reason == ReviewActiveLearning {
+			m.lastLearningSent = now
+		} else {
+			m.lastSent = now
+		}
 		m.latched = true
 		return nil
 	case <-ctx.Done():
@@ -178,31 +205,47 @@ func (m *monitor) observeCandidate(hit bool) bool {
 	return false
 }
 
-func selectCandidate(frames []analyzedFrame, threshold, classifierThreshold float64, requireClassifier bool, required int) (analyzedFrame, bool) {
+func selectCandidate(frames []analyzedFrame, threshold, classifierThreshold, activeLearningMin float64, requireClassifier bool, required int) (analyzedFrame, ReviewReason, bool) {
 	if required < 1 {
 		required = 1
 	}
+	best, hits := bestCandidate(frames, threshold, classifierThreshold, 1.01, requireClassifier)
+	if hits >= required && best.path != "" {
+		return best, ReviewAlert, true
+	}
+	if requireClassifier {
+		best, hits = bestCandidate(frames, threshold, activeLearningMin, classifierThreshold, true)
+		if hits >= required && best.path != "" {
+			return best, ReviewActiveLearning, true
+		}
+	}
+	return analyzedFrame{}, "", false
+}
+
+func bestCandidate(frames []analyzedFrame, geometryThreshold, classifierMin, classifierMax float64, useClassifier bool) (analyzedFrame, int) {
 	hits := 0
 	best := analyzedFrame{}
 	for _, frame := range frames {
-		if frame.detection.Score < threshold {
+		if frame.detection.Score < geometryThreshold {
 			continue
 		}
-		if requireClassifier && (!frame.detection.ClassifierAvailable || frame.detection.ClassifierScore < classifierThreshold) {
-			continue
+		score := frame.detection.Score
+		if useClassifier {
+			if !frame.detection.ClassifierAvailable || frame.detection.ClassifierScore < classifierMin || frame.detection.ClassifierScore >= classifierMax {
+				continue
+			}
+			score = frame.detection.ClassifierScore
 		}
 		hits++
-		candidateScore := frame.detection.Score
 		bestScore := best.detection.Score
-		if requireClassifier {
-			candidateScore = frame.detection.ClassifierScore
+		if useClassifier {
 			bestScore = best.detection.ClassifierScore
 		}
-		if candidateScore > bestScore {
+		if score > bestScore {
 			best = frame
 		}
 	}
-	return best, hits >= required && best.path != ""
+	return best, hits
 }
 
 func modelExists(path string) bool {
