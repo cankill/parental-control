@@ -106,6 +106,63 @@ func TestRenderExactHourlyActivityReportsAtRealTimes(t *testing.T) {
 	}
 }
 
+func TestRenderExactDailyAndWeeklyActivityReportsAtRealTimes(t *testing.T) {
+	tests := []struct {
+		name     string
+		period   types.ActivityPeriod
+		duration time.Duration
+		offset   time.Duration
+	}{
+		{name: "daily", period: types.ActivityDaily, duration: 24 * time.Hour, offset: 6 * time.Hour},
+		{name: "weekly", period: types.ActivityWeekly, duration: 7 * 24 * time.Hour, offset: 42 * time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start := time.Date(2026, 9, 21, 0, 0, 0, 0, time.Local)
+			resp := &types.ActivityResponse{
+				Period: tt.period, TimeStamp: "period", PeriodStart: start, PeriodEnd: start.Add(tt.duration),
+				Samples: []types.ActivitySample{{At: start.Add(tt.offset), Kind: types.ActivityBoth}},
+			}
+			data, err := renderActivityPNG(resp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			img, err := png.Decode(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			x, y := activityPolarPoint(165, 0)
+			assertPixelColorNear(t, img, int(x), int(y), keyboardColor)
+			x, y = activityPolarPoint(305, 0)
+			assertPixelColorNear(t, img, int(x), int(y), mouseColor)
+			caption := activityCaption(resp)
+			if len(caption.Array) != 2 || caption.Array[0].PlainText != activityPeriodLabel(tt.period)+": " {
+				t.Fatalf("exact caption = %#v", caption.Array)
+			}
+		})
+	}
+}
+
+func TestActivityEventDirectionsPreserveKindsAndBoundRenderingWork(t *testing.T) {
+	start := time.Date(2026, 9, 21, 0, 0, 0, 0, time.Local)
+	resp := &types.ActivityResponse{PeriodStart: start, PeriodEnd: start.AddDate(0, 0, 7)}
+	resp.Samples = []types.ActivitySample{
+		{At: start.Add(time.Second), Kind: types.ActivityKeyboard},
+		{At: start.Add(2 * time.Second), Kind: types.ActivityMouse},
+		{At: start.AddDate(0, 0, 6), Kind: types.ActivityKeyboard},
+	}
+	directions := activityEventDirections(resp)
+	if len(directions) != activityEventDirectionLimit {
+		t.Fatalf("directions = %d, want %d", len(directions), activityEventDirectionLimit)
+	}
+	if directions[0] != types.ActivityBoth {
+		t.Fatalf("coalesced first direction = %d, want both", directions[0])
+	}
+	if directions[6*activityEventDirectionLimit/7] != types.ActivityKeyboard {
+		t.Fatalf("sixth-day direction = %d, want keyboard", directions[6*activityEventDirectionLimit/7])
+	}
+}
+
 func TestRenderActivityPeriods(t *testing.T) {
 	tests := []struct {
 		period  types.ActivityPeriod
@@ -184,6 +241,11 @@ func TestWriteActivityPreview(t *testing.T) {
 			MouseOnlySeconds:    (i % 7) * 210,
 			BothSeconds:         (i % 3) * 120,
 		}
+		daily.Samples = append(daily.Samples,
+			types.ActivitySample{At: dayStart.Add(time.Duration(i)*time.Hour + 15*time.Minute), Kind: types.ActivityKeyboard},
+			types.ActivitySample{At: dayStart.Add(time.Duration(i)*time.Hour + 30*time.Minute), Kind: types.ActivityMouse},
+			types.ActivitySample{At: dayStart.Add(time.Duration(i)*time.Hour + 45*time.Minute), Kind: types.ActivityBoth},
+		)
 	}
 	weekStart := time.Date(2026, 7, 27, 0, 0, 0, 0, time.Local)
 	weekly := &types.ActivityResponse{
@@ -201,6 +263,12 @@ func TestWriteActivityPreview(t *testing.T) {
 			MouseOnlySeconds:    (7 - i) * 2100,
 			BothSeconds:         (i % 3) * 900,
 		}
+		dayStart := weekStart.AddDate(0, 0, i)
+		weekly.Samples = append(weekly.Samples,
+			types.ActivitySample{At: dayStart.Add(9 * time.Hour), Kind: types.ActivityKeyboard},
+			types.ActivitySample{At: dayStart.Add(13 * time.Hour), Kind: types.ActivityMouse},
+			types.ActivitySample{At: dayStart.Add(17 * time.Hour), Kind: types.ActivityBoth},
+		)
 	}
 	ext := filepath.Ext(path)
 	base := path[:len(path)-len(ext)]

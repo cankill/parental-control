@@ -93,7 +93,7 @@ func TestGetActivityGroupsHourDayAndWeek(t *testing.T) {
 	}
 }
 
-func TestHourlyActivityPreservesExactReportSeconds(t *testing.T) {
+func TestActivityPeriodsPreserveExactReportSeconds(t *testing.T) {
 	s := activityStorage(t)
 	start := time.Now().Truncate(time.Hour)
 	want := []types.ActivitySample{
@@ -102,13 +102,15 @@ func TestHourlyActivityPreservesExactReportSeconds(t *testing.T) {
 	}
 	s.AddActivity(want)
 
-	got := s.GetActivity(types.ActivityHourly, 0).Samples
-	if len(got) != len(want) {
-		t.Fatalf("exact samples = %+v", got)
-	}
-	for i := range want {
-		if !got[i].At.Equal(want[i].At) || got[i].Kind != want[i].Kind {
-			t.Fatalf("sample[%d] = %+v, want %+v", i, got[i], want[i])
+	for _, period := range []types.ActivityPeriod{types.ActivityHourly, types.ActivityDaily, types.ActivityWeekly} {
+		got := s.GetActivity(period, 0).Samples
+		if len(got) != len(want) {
+			t.Fatalf("period %d exact samples = %+v", period, got)
+		}
+		for i := range want {
+			if !got[i].At.Equal(want[i].At) || got[i].Kind != want[i].Kind {
+				t.Fatalf("period %d sample[%d] = %+v, want %+v", period, i, got[i], want[i])
+			}
 		}
 	}
 }

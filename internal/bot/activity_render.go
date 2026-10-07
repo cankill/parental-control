@@ -34,6 +34,7 @@ const hourlyMouseInnerRadius, hourlyMouseOuterRadius = 245.0, 365.0
 const activityWorkdaySeconds = 8 * 60 * 60
 const activitySmallFontSize = 11.0
 const activityScaleFontSize = activitySmallFontSize * 1.2
+const activityEventDirectionLimit = 4096
 
 var (
 	chartBackground = color.RGBA{248, 250, 252, 255}
@@ -91,10 +92,7 @@ func activityBuckets(resp *types.ActivityResponse) []types.ActivityBucket {
 	return make([]types.ActivityBucket, count)
 }
 
-func useExactHourlyActivity(resp *types.ActivityResponse) bool {
-	if resp.Period != types.ActivityHourly {
-		return false
-	}
+func useExactActivity(resp *types.ActivityResponse) bool {
 	total, _ := activityMetrics(activityBuckets(resp))
 	return len(resp.Samples) > 0 || total == 0
 }
@@ -312,24 +310,42 @@ func drawActivityBars(ctx *canvas.Context, buckets []types.ActivityBucket, maxim
 	}
 }
 
-func drawHourlyEventGrid(ctx *canvas.Context, img draw.Image, face font.Face) {
+func drawActivityEventGrid(ctx *canvas.Context, img draw.Image, face font.Face, period types.ActivityPeriod) {
 	for _, radius := range []float64{
 		hourlyKeyboardInnerRadius, hourlyKeyboardOuterRadius,
 		hourlyMouseInnerRadius, hourlyMouseOuterRadius,
 	} {
 		drawCanvasCircle(ctx, radius, 1, nil, chartGrid)
 	}
-	for minute := 0; minute < 60; minute++ {
-		angle := -math.Pi/2 + float64(minute)*2*math.Pi/60
-		major := minute%15 == 0
-		if minute%5 == 0 {
+	tickCount := 60
+	if period == types.ActivityDaily {
+		tickCount = 24
+	} else if period == types.ActivityWeekly {
+		tickCount = 7
+	}
+	for tick := 0; tick < tickCount; tick++ {
+		grid := tick%5 == 0
+		major := tick%15 == 0
+		label := fmt.Sprintf("%02d", tick)
+		switch period {
+		case types.ActivityDaily:
+			grid = true
+			major = tick%6 == 0
+			label = fmt.Sprintf("%02d", tick)
+		case types.ActivityWeekly:
+			grid = true
+			major = true
+			label, _ = activityClockLabel(period, tick)
+		}
+		angle := -math.Pi/2 + float64(tick)*2*math.Pi/float64(tickCount)
+		if grid {
 			x0, y0 := activityPolarPoint(hourlyKeyboardInnerRadius, angle)
 			x1, y1 := activityPolarPoint(hourlyMouseOuterRadius, angle)
 			drawCanvasLine(ctx, x0, y0, x1, y1, 1, chartGrid, false)
 		}
 		tickLength := 6.0
 		tickWidth := 1.0
-		if minute%5 == 0 {
+		if grid {
 			tickLength = 10
 			tickWidth = 1.5
 		}
@@ -341,7 +357,6 @@ func drawHourlyEventGrid(ctx *canvas.Context, img draw.Image, face font.Face) {
 		x1, y1 := activityPolarPoint(activityClockRadius, angle)
 		drawCanvasLine(ctx, x0, y0, x1, y1, tickWidth, chartAxis, false)
 		if major {
-			label := fmt.Sprintf("%02d", minute)
 			x, y := activityPolarPoint(activityClockRadius+25, angle)
 			width := font.MeasureString(face, label).Round()
 			drawText(img, face, int(x)-width/2, int(y)+5, label, chartAxis)
@@ -350,30 +365,66 @@ func drawHourlyEventGrid(ctx *canvas.Context, img draw.Image, face font.Face) {
 	drawCanvasCircle(ctx, activityClockRadius, 2, nil, chartAxis)
 }
 
-func hourlySampleAngle(resp *types.ActivityResponse, at time.Time) (float64, bool) {
+func activitySampleAngle(resp *types.ActivityResponse, at time.Time) (float64, bool) {
 	if resp.PeriodStart.IsZero() || resp.PeriodEnd.IsZero() || at.Before(resp.PeriodStart) || !at.Before(resp.PeriodEnd) {
 		return 0, false
 	}
 	return -math.Pi/2 + 2*math.Pi*float64(at.Sub(resp.PeriodStart))/float64(resp.PeriodEnd.Sub(resp.PeriodStart)), true
 }
 
-func drawHourlyEventSamples(ctx *canvas.Context, resp *types.ActivityResponse) {
-	for _, sample := range resp.Samples {
-		angle, ok := hourlySampleAngle(resp, sample.At)
-		if !ok {
-			continue
-		}
-		if sample.Kind == types.ActivityKeyboard || sample.Kind == types.ActivityBoth {
+func drawActivityEventSamples(ctx *canvas.Context, resp *types.ActivityResponse) {
+	directions := activityEventDirections(resp)
+	for direction, kind := range directions {
+		angle := -math.Pi/2 + 2*math.Pi*float64(direction)/float64(len(directions))
+		if kind == types.ActivityKeyboard || kind == types.ActivityBoth {
 			x0, y0 := activityPolarPoint(hourlyKeyboardInnerRadius, angle)
 			x1, y1 := activityPolarPoint(hourlyKeyboardOuterRadius, angle)
 			drawCanvasLine(ctx, x0, y0, x1, y1, 3, keyboardColor, false)
 		}
-		if sample.Kind == types.ActivityMouse || sample.Kind == types.ActivityBoth {
+		if kind == types.ActivityMouse || kind == types.ActivityBoth {
 			x0, y0 := activityPolarPoint(hourlyMouseInnerRadius, angle)
 			x1, y1 := activityPolarPoint(hourlyMouseOuterRadius, angle)
 			drawCanvasLine(ctx, x0, y0, x1, y1, 3, mouseColor, false)
 		}
 	}
+}
+
+// activityEventDirections limits drawing work to the angular resolution of the
+// image. It never turns reports into elapsed activity: every occupied direction
+// still comes from one or more exact input timestamps, while the center retains
+// the unmodified report count.
+func activityEventDirections(resp *types.ActivityResponse) []types.ActivityKind {
+	if resp.PeriodStart.IsZero() || resp.PeriodEnd.IsZero() || !resp.PeriodStart.Before(resp.PeriodEnd) {
+		return nil
+	}
+	directionCount := int(resp.PeriodEnd.Sub(resp.PeriodStart) / time.Second)
+	if directionCount > activityEventDirectionLimit {
+		directionCount = activityEventDirectionLimit
+	}
+	if directionCount < 1 {
+		return nil
+	}
+	directions := make([]types.ActivityKind, directionCount)
+	periodDuration := resp.PeriodEnd.Sub(resp.PeriodStart)
+	for _, sample := range resp.Samples {
+		if sample.Kind == types.ActivityNone {
+			continue
+		}
+		if _, ok := activitySampleAngle(resp, sample.At); !ok {
+			continue
+		}
+		direction := int(float64(sample.At.Sub(resp.PeriodStart)) * float64(directionCount) / float64(periodDuration))
+		if direction >= directionCount {
+			direction = directionCount - 1
+		}
+		switch {
+		case directions[direction] == types.ActivityNone:
+			directions[direction] = sample.Kind
+		case directions[direction] != sample.Kind:
+			directions[direction] = types.ActivityBoth
+		}
+	}
+	return directions
 }
 
 func drawPresenceOutline(ctx *canvas.Context, resp *types.ActivityResponse) {
@@ -438,9 +489,9 @@ func renderActivityPNG(resp *types.ActivityResponse) ([]byte, error) {
 	buckets := activityBuckets(resp)
 	totalSeconds, maximumSeconds := activityMetrics(buckets)
 
-	if useExactHourlyActivity(resp) {
-		drawHourlyEventGrid(ctx, img, regularFace)
-		drawHourlyEventSamples(ctx, resp)
+	if useExactActivity(resp) {
+		drawActivityEventGrid(ctx, img, regularFace, resp.Period)
+		drawActivityEventSamples(ctx, resp)
 		drawPresenceOutline(ctx, resp)
 		drawCanvasCircle(ctx, activityInnerRadius-12, 2, chartBackground, chartAxis)
 		ras.Close()
@@ -525,7 +576,7 @@ func formatActivityPercent(value float64) string {
 
 func activityCaption(resp *types.ActivityResponse) models.RichText {
 	totalSeconds, _ := activityMetrics(activityBuckets(resp))
-	if useExactHourlyActivity(resp) && len(resp.Samples) > 0 {
+	if useExactActivity(resp) && len(resp.Samples) > 0 {
 		return richTextSequence(
 			richText(activityPeriodLabel(resp.Period)+": "), richBold(formatReportTimestamp(resp.TimeStamp)),
 		)

@@ -439,8 +439,9 @@ func (s *StatsStorage) NearestDomainWeekShift(fromShift int, older bool) (int, b
 	return best, best != -1
 }
 
-// AddActivity stores aggregate five-minute totals for day/week reports and
-// exact per-second input marks for the hourly timeline.
+// AddActivity stores aggregate five-minute totals and exact per-second input
+// marks. The same raw timeline can then be projected across an hour, day, or
+// week without turning input reports into estimated active time.
 func (s *StatsStorage) AddActivity(samples []types.ActivitySample) {
 	writtenByHour := make(map[string]int)
 	type pendingActivityMinute struct {
@@ -520,6 +521,7 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 			}
 			return buckets
 		})
+		resp.Samples = s.readActivitySamples(resp.PeriodStart, resp.PeriodEnd)
 	case types.ActivityWeekly:
 		weekStart := activityWeekStart(now).AddDate(0, 0, -7*shift)
 		weekEnd := weekStart.AddDate(0, 0, 6)
@@ -538,6 +540,7 @@ func (s *StatsStorage) GetActivity(period types.ActivityPeriod, shift int) *type
 			}
 			return buckets
 		})
+		resp.Samples = s.readActivitySamples(resp.PeriodStart, resp.PeriodEnd)
 	default:
 		resp.Period = types.ActivityHourly
 		resp.PeriodStart = now.Add(-time.Duration(shift) * time.Hour).Truncate(time.Hour)
@@ -649,6 +652,17 @@ func (s *StatsStorage) readActivitySamplesHour(hour string) []types.ActivitySamp
 		}
 	}
 	sort.Slice(samples, func(i, j int) bool { return samples[i].At.Before(samples[j].At) })
+	return samples
+}
+
+func (s *StatsStorage) readActivitySamples(start, end time.Time) []types.ActivitySample {
+	if start.IsZero() || end.IsZero() || !start.Before(end) {
+		return nil
+	}
+	samples := make([]types.ActivitySample, 0)
+	for hour := start.Truncate(time.Hour); hour.Before(end); hour = hour.Add(time.Hour) {
+		samples = append(samples, s.readActivitySamplesHour(hour.Format(TruncatedToHour))...)
+	}
 	return samples
 }
 
