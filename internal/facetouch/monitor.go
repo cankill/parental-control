@@ -24,6 +24,7 @@ type Options struct {
 	ActiveLearningMin      float64
 	ActiveLearningCooldown time.Duration
 	RequiredFrames         int
+	OnAlert                func()
 }
 
 func NewOptions(interval time.Duration, threshold float64, cooldown time.Duration) Options {
@@ -62,6 +63,11 @@ func (o Options) WithActiveLearning(minimum float64, cooldown time.Duration) Opt
 	return o
 }
 
+func (o Options) WithAlert(callback func()) Options {
+	o.OnAlert = callback
+	return o
+}
+
 type Candidate struct {
 	Record Record
 	Photo  []byte
@@ -91,7 +97,8 @@ type monitor struct {
 func Monitor(ctx context.Context, presence Presence, store *Store, options Options, events chan<- Candidate) {
 	options = NewOptions(options.Interval, options.Threshold, options.Cooldown).
 		WithClassifier(options.ClassifierPath, options.ClassifierThreshold).
-		WithActiveLearning(options.ActiveLearningMin, options.ActiveLearningCooldown)
+		WithActiveLearning(options.ActiveLearningMin, options.ActiveLearningCooldown).
+		WithAlert(options.OnAlert)
 	classifierReady := modelExists(options.ClassifierPath)
 	analyze := vision.AnalyzeFaceTouch
 	if classifierReady {
@@ -160,6 +167,7 @@ func (m *monitor) check(ctx context.Context) error {
 	if !m.observeCandidate(ok) {
 		return nil
 	}
+	m.signalVisualAlert(reason)
 	lastSent, cooldown := m.lastSent, m.options.Cooldown
 	if reason == ReviewActiveLearning {
 		lastSent, cooldown = m.lastLearningSent, m.options.ActiveLearningCooldown
@@ -188,6 +196,15 @@ func (m *monitor) check(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func (m *monitor) signalVisualAlert(reason ReviewReason) {
+	// The local cue is intentionally stricter than the data-collection path:
+	// it only reacts to a positive classifier result. Geometry-only fallback
+	// and active-learning candidates must stay silent.
+	if m.classifierReady && reason == ReviewAlert && m.options.OnAlert != nil {
+		m.options.OnAlert()
 	}
 }
 

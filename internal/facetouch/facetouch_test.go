@@ -90,6 +90,27 @@ func TestMonitorNotifiesOncePerHeldGesture(t *testing.T) {
 	}
 }
 
+func TestVisualSignalOnlyRunsForConfirmedAlert(t *testing.T) {
+	calls := 0
+	m := &monitor{
+		classifierReady: true,
+		options:         Options{OnAlert: func() { calls++ }},
+	}
+	m.signalVisualAlert(ReviewActiveLearning)
+	if calls != 0 {
+		t.Fatalf("active-learning visual calls = %d, want 0", calls)
+	}
+	m.signalVisualAlert(ReviewAlert)
+	if calls != 1 {
+		t.Fatalf("confirmed visual calls = %d, want 1", calls)
+	}
+	m.classifierReady = false
+	m.signalVisualAlert(ReviewAlert)
+	if calls != 1 {
+		t.Fatalf("geometry-only visual calls = %d, want 1", calls)
+	}
+}
+
 func TestStorePersistsLabelsAndSummary(t *testing.T) {
 	store, err := OpenStore(t.TempDir())
 	if err != nil {

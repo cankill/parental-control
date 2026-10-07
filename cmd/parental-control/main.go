@@ -14,6 +14,7 @@ import (
 	"parental-control/internal/facetouch"
 	"parental-control/internal/lib/config"
 	"parental-control/internal/lib/types"
+	"parental-control/internal/overlay"
 	"parental-control/internal/presence"
 	"parental-control/internal/statistics"
 
@@ -71,6 +72,10 @@ func main() {
 		}
 
 		presenceSignal := presence.NewSignal()
+		var faceTouchVisualSignal func()
+		if env.FaceTouchVisualSignalEnabled {
+			faceTouchVisualSignal = overlay.NewChinNotifier(ctx, env.FaceTouchVisualCooldown()).Signal
+		}
 		faceTouchEvents := make(chan facetouch.Candidate, 8)
 		faceTouchStore, err := facetouch.OpenStore(facetouch.StorePath())
 		if err != nil {
@@ -93,7 +98,8 @@ func main() {
 				faceTouchOptions := facetouch.NewOptions(
 					env.FaceTouchInterval(), env.FaceTouchThreshold(), env.FaceTouchCooldown()).
 					WithClassifier(facetouch.ModelPath(), env.FaceTouchModelThreshold()).
-					WithActiveLearning(env.FaceTouchActiveLearningMin(), env.FaceTouchActiveLearningCooldown())
+					WithActiveLearning(env.FaceTouchActiveLearningMin(), env.FaceTouchActiveLearningCooldown()).
+					WithAlert(faceTouchVisualSignal)
 				facetouch.Monitor(ctx, presenceSignal, faceTouchStore, faceTouchOptions, faceTouchEvents)
 			}()
 		}

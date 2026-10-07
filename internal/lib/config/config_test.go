@@ -52,8 +52,8 @@ func TestMustLoadParsesMultipleAdmins(t *testing.T) {
 	if len(env.PresenceWorkDays) != 5 || env.PresenceWorkDays[0] != 1 || env.PresenceWorkDays[4] != 5 {
 		t.Errorf("presence work days = %v", env.PresenceWorkDays)
 	}
-	if env.FaceTouchInterval() != 10*time.Second || env.FaceTouchThreshold() != 0.8 || env.FaceTouchModelThreshold() != 0.8 || env.FaceTouchCooldown() != 30*time.Second || env.FaceTouchActiveLearningMin() != 0.4 || env.FaceTouchActiveLearningCooldown() != 30*time.Minute {
-		t.Errorf("face-touch defaults = interval %s threshold %.2f model threshold %.2f cooldown %s active-learning %.2f/%s",
-			env.FaceTouchInterval(), env.FaceTouchThreshold(), env.FaceTouchModelThreshold(), env.FaceTouchCooldown(), env.FaceTouchActiveLearningMin(), env.FaceTouchActiveLearningCooldown())
+	if env.FaceTouchInterval() != 10*time.Second || env.FaceTouchThreshold() != 0.8 || env.FaceTouchModelThreshold() != 0.8 || env.FaceTouchCooldown() != 30*time.Second || env.FaceTouchActiveLearningMin() != 0.4 || env.FaceTouchActiveLearningCooldown() != 30*time.Minute || !env.FaceTouchVisualSignalEnabled || env.FaceTouchVisualCooldown() != 20*time.Second {
+		t.Errorf("face-touch defaults = interval %s threshold %.2f model threshold %.2f cooldown %s active-learning %.2f/%s visual %v/%s",
+			env.FaceTouchInterval(), env.FaceTouchThreshold(), env.FaceTouchModelThreshold(), env.FaceTouchCooldown(), env.FaceTouchActiveLearningMin(), env.FaceTouchActiveLearningCooldown(), env.FaceTouchVisualSignalEnabled, env.FaceTouchVisualCooldown())
 	}
 }
